@@ -1,6 +1,6 @@
 DATABASES = {
     'ENGINE': 'django.db.backends.postgresql',
-    'NAME': 'scdb',
+    'NAME': 'scdb_dev',
     'USER': 'postgres',
     'PASSWORD': 'wAFQ63y!AEsH',
     'HOST': 'localhost',

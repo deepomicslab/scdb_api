@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'django_filters',
     'django_crontab',
     'django_extensions',
+    'task',
 ]
 
 MIDDLEWARE = [
