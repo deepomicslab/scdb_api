@@ -1,13 +1,14 @@
 DATABASES = {
     'ENGINE': 'django.db.backends.postgresql',
-    'NAME': 'scdb_dev',
+    'NAME': 'scdb_platform_dev',
     'USER': 'postgres',
     'PASSWORD': 'wAFQ63y!AEsH',
     'HOST': 'localhost',
     'PORT': '5432',
 }
 
-# USERTASKPATH = 'workspace/user_task'
+USERTASKPATH = 'workspace/user_data'
+SCQUERY_SCRIPT='/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old/run.sh'
 # ABSUSERTASKPATH = '/home/platform/phage_db/phage_api/workspace/user_task'
 # PHAGEFASTA = '/home/platform/phage_db/phage_data/data/phage_sequence/phage_fasta/'
 # PHAGEGBK = '/home/platform/phage_db/phage_data/data/phage_sequence/phage_gbk/individual_data/'

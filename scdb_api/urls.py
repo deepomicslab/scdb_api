@@ -19,14 +19,18 @@ from django.urls import path
 from task.views import taskViewSet
 from rest_framework import routers
 import task.views
+from django.urls import path, include
 
 router = routers.DefaultRouter()
 router.register('task', taskViewSet)
 
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('', include(router.urls)),
+    path('api/', include('rest_framework.urls')),
     path('tasks/detail/', task.views.viewtask),
+    path('tasks/list/', task.views.viewtasklist),
+    path('tasks/createtask/', task.views.createtask),
 ]
 
 
