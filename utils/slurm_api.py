@@ -72,4 +72,4 @@ def submit_job(shell_script, script_arguments=None, dependency_job_ids=None):
     job_id = re.search(r"Submitted batch job (\d+)", sbatch_output).group(1)
     return job_id
 
-def submit_pipline()
+

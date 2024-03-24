@@ -7,8 +7,14 @@ DATABASES = {
     'PORT': '5432',
 }
 
-USERTASKPATH = 'workspace/user_data'
+APIURL = 'https://scdbapi.deepomics.org/'
+FILEAPI='https://scdbapi.deepomics.org/tasks/getoutputfile/'
+
+
+USERTASKPATH = 'workspace/user_data/'
+SCDB_MODULE='/home/platform/project/scdb_platform/scdb_api/workspace/module/'
 SCQUERY_SCRIPT='/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old/run.sh'
+
 # ABSUSERTASKPATH = '/home/platform/phage_db/phage_api/workspace/user_task'
 # PHAGEFASTA = '/home/platform/phage_db/phage_data/data/phage_sequence/phage_fasta/'
 # PHAGEGBK = '/home/platform/phage_db/phage_data/data/phage_sequence/phage_gbk/individual_data/'
