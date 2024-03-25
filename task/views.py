@@ -14,8 +14,9 @@ from scdb_api import settings_local as local_settings
 from utils import slurm_api
 from django.http import FileResponse
 import pandas as pd
-import utils.analysis
-
+import utils.analysis 
+from utils.page import paginate_dataframe
+import pickle
 
 class taskViewSet(viewsets.ModelViewSet):
     queryset = tasks.objects.order_by('id')
@@ -78,9 +79,12 @@ def createtask(request):
             else:
                 newmodule = cls(request.data['taskname'],usertask_dir,parameters_dict)
                 job_id = newmodule.process()
+
                 taskdetailjson=[{'modulename':request.data['modulename'],'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
                 with open(userpath+'/'+'taskdetail.json', 'w') as f:
                     json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
+                with open(userpath+'/moduleobject.pkl', 'wb') as f:
+                    pickle.dump(newmodule, f)
                 newtask.status = 'Running'
                 res['status'] = 'Success'
                 res['message'] = 'task create successfully'
@@ -139,5 +143,48 @@ def taskumapview(request):
         umappddata = umappddata.iloc[:500]
     return Response({'results': umappddata.to_dict(orient='records')})
 
+@api_view(['GET'])
+def taskresultview(request):
+    """
+    Get task result: metadata, expression, umap
+    - taskid
+    - resulttype: metadata, expression, umap
+    - start, end (optional)
+    - page, pagesize (optional)
+    """
+    query_params = request.query_params.dict()
+    taskid = query_params['taskid']
+    resulttype = query_params['resulttype']
+
+    taskobject = tasks.objects.filter(id=taskid)
+    serializer = taskSerializer(taskobject, many=True)
+    taskdata=serializer.data[0]
+    if resulttype == 'metadata':
+        #metadatafile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_meta.csv'
+        #test_meta_data
+        metadatafile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_meta_data.txt'
+        metadata = pd.read_csv(metadatafile,sep='\t', index_col=False)
+        count = metadata.shape[0]
+        rename_dict = {'Unnamed: 0': 'Cell_id',
+                    'orig.ident':'orig_ident',
+                    'Celltype..malignancy.': 'Celltype_malignancy',
+                    'Celltype..major.lineage.':'Celltype_major_lineage'}
+        metadata.rename(columns=rename_dict, inplace=True) # rename the first column
+        metadata=paginate_dataframe(metadata, int(query_params['page']), int(query_params['pagesize'])) # paginate the metadata
+        return Response({'results': metadata.to_dict(orient='records'), 'count': count})
+    elif resulttype == 'umap':
+        umapfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_umap_data.txt'
+        umappddata = pd.read_csv(umapfile, sep='\t', index_col=False)
+        if 'start' in query_params and 'end' in query_params:
+            start = int(query_params['start'])
+            end = int(query_params['end'])
+            umappddata = umappddata.iloc[start:end]
+        else:
+            umappddata = umappddata.iloc[:500]
+        return Response({'results': umappddata.to_dict(orient='records')})
+    else:
+        expressionfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_expression.csv'
+        expression = pd.read_csv(expressionfile, index_col=0)
+        return Response({'results': expression.to_dict(orient='records')})
 
 

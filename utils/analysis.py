@@ -24,14 +24,15 @@ class Module:
         # statuslist = ['PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING', 'COMPLETED','CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL']
         if self.job_id is None:
             raise ValueError("Job ID is not set. Cannot check status.")
-        return slurm_api.get_job_status(self.job_id)
+        self.status = slurm_api.get_job_status(self.job_id)
+        return self.status
 
     def process(self):
 
         if self.shell_script is None:
             raise ValueError("Shell script is not set. Cannot process module.")
         if len(self.dependencies) == 0:
-            print(self.shell_script,self.script_arguments)
+            #print(self.shell_script,self.script_arguments)
             self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments)
         else:
             dependencies_jobs = [dependency.job_id for dependency in self.dependencies if dependency.job_id is not None]
