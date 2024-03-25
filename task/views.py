@@ -16,6 +16,7 @@ from django.http import FileResponse
 import pandas as pd
 import utils.analysis 
 from utils.page import paginate_dataframe
+from utils.fileprocess import get_gene_list
 import pickle
 
 class taskViewSet(viewsets.ModelViewSet):
@@ -126,22 +127,6 @@ def getoutputfile(request, path):
     response['Content-Type'] = 'text/plain'
     return response
 
-@api_view(['GET'])
-def taskumapview(request):
-    query_params = request.query_params.dict()
-    taskid = query_params['taskid']
-    taskobject = tasks.objects.filter(id=taskid)
-    serializer = taskSerializer(taskobject, many=True)
-    taskdata=serializer.data[0]
-    umapfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_umap_data.txt'
-    umappddata = pd.read_csv(umapfile, sep='\t', index_col=False)
-    if 'start' in query_params and 'end' in query_params:
-        start = int(query_params['start'])
-        end = int(query_params['end'])
-        umappddata = umappddata.iloc[start:end]
-    else:
-        umappddata = umappddata.iloc[:500]
-    return Response({'results': umappddata.to_dict(orient='records')})
 
 @api_view(['GET'])
 def taskresultview(request):
@@ -149,13 +134,12 @@ def taskresultview(request):
     Get task result: metadata, expression, umap
     - taskid
     - resulttype: metadata, expression, umap
-    - start, end (optional)
     - page, pagesize (optional)
+    - gene (optional)
     """
     query_params = request.query_params.dict()
     taskid = query_params['taskid']
     resulttype = query_params['resulttype']
-
     taskobject = tasks.objects.filter(id=taskid)
     serializer = taskSerializer(taskobject, many=True)
     taskdata=serializer.data[0]
@@ -175,13 +159,31 @@ def taskresultview(request):
     elif resulttype == 'umap':
         umapfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_umap_data.txt'
         umappddata = pd.read_csv(umapfile, sep='\t', index_col=False)
-        if 'start' in query_params and 'end' in query_params:
-            start = int(query_params['start'])
-            end = int(query_params['end'])
-            umappddata = umappddata.iloc[start:end]
-        else:
-            umappddata = umappddata.iloc[:500]
+        rename_dict = {'Unnamed: 0': 'Cell_id',}
+        umappddata.rename(columns=rename_dict, inplace=True) # rename the first column
+        #metadata.rename(columns=rename_dict, inplace=True) # rename the first column
         return Response({'results': umappddata.to_dict(orient='records')})
+    elif resulttype == 'batcheffect':
+        
+        #/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1711342584_1901/result/batch_effect/batch_effected_split
+        genelist,gene_path_dict=get_gene_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/batch_effect/batch_effected_split')
+        geneoption=[{'value':gene,'label':gene} for gene in genelist]
+        #return Response({'geneoption': geneoption})
+        if 'gene' in query_params:
+            gene = query_params['gene']
+            path=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/batch_effect/batch_effected_split/'+gene_path_dict[gene]
+            batcheffect_data=pd.read_csv(path,sep='\t',index_col=False,skiprows=1,header=None)
+            rename_dict = {0: 'Cell_id',1:'Gene'}
+            batcheffect_data.rename(columns=rename_dict, inplace=True) 
+            return Response({'path':path,'results': batcheffect_data.to_dict(orient='records'),'geneoption': geneoption,'gene':gene})
+        else:
+            compid = query_params['compid']
+            gene = genelist[int(compid)]
+            path=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/batch_effect/batch_effected_split/'+gene_path_dict[gene]
+            batcheffect_data=pd.read_csv(path,sep='\t',index_col=False,skiprows=1,header=None)
+            rename_dict = {0: 'Cell_id',1:'Gene'}
+            batcheffect_data.rename(columns=rename_dict, inplace=True)            
+            return Response({'path':path,'results': batcheffect_data.to_dict(orient='records'),'geneoption': geneoption,'gene':gene})
     else:
         expressionfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_expression.csv'
         expression = pd.read_csv(expressionfile, index_col=0)
