@@ -16,7 +16,7 @@ from django.http import FileResponse
 import pandas as pd
 import utils.analysis 
 from utils.page import paginate_dataframe
-from utils.fileprocess import get_gene_list
+from utils.fileprocess import get_gene_list,get_cluster_list
 import pickle
 
 class taskViewSet(viewsets.ModelViewSet):
@@ -184,6 +184,28 @@ def taskresultview(request):
             rename_dict = {0: 'Cell_id',1:'Gene'}
             batcheffect_data.rename(columns=rename_dict, inplace=True)            
             return Response({'path':path,'results': batcheffect_data.to_dict(orient='records'),'geneoption': geneoption,'gene':gene})
+    elif resulttype == 'casuality':
+        #/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1711342584_1901/result/casuality
+        cluster_input_list,inputdict=get_cluster_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/input')
+        cluster_output_list,outputdict=get_cluster_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/output')
+        clusteroption=[{'value':cluster,'label':"cluster_"+cluster} for cluster in cluster_input_list]
+        if 'cluster' in query_params:
+            cluster = query_params['cluster']
+        else:
+            cluster = cluster_output_list[0]
+        inputpath=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/input/'+inputdict[cluster]
+        outputpath=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/output/'+outputdict[cluster]
+        inputcasuality_data=pd.read_csv(inputpath,sep=',',index_col=False)
+        outputcasuality_data=pd.read_csv(outputpath,sep=',',index_col=False)
+        rename_dict = {'Unnamed: 0': 'gene'}
+        inputcasuality_data.rename(columns=rename_dict, inplace=True) 
+        outputcasuality_data.rename(columns=rename_dict, inplace=True)
+        return Response({'results': {'inputdata':inputcasuality_data.to_dict(orient='records'),
+                                    'outputdata':outputcasuality_data.to_dict(orient='records')},
+                                    'clusteroption': clusteroption,'cluster':cluster})
+
+
+
     else:
         expressionfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_expression.csv'
         expression = pd.read_csv(expressionfile, index_col=0)
