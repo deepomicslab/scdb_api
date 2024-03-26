@@ -35,8 +35,6 @@ urlpatterns = [
     path('tasks/getoutputfile/<path:path>/', task.views.getoutputfile),
     #taskdetailview
     path('tasks/taskdetailview/', task.views.taskdetailview),
-    #taskumapview
-    path('tasks/taskumapview/', task.views.taskumapview),
     #taskresultview
     path('tasks/taskresultview/', task.views.taskresultview),
 ]
