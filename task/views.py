@@ -40,6 +40,7 @@ def createtask(request):
     - submitfile
     - taskname
     - tasktype
+    - projectname
     - modulename
     - parameters
     """
@@ -49,7 +50,7 @@ def createtask(request):
     uploadfilepath = userpath + '/upload/'
     os.makedirs(uploadfilepath, exist_ok=False)
     file = request.FILES['submitfile']
-    default_storage.save(uploadfilepath+'query.csv', ContentFile(file.read()))
+    default_storage.save(uploadfilepath+'input.h5ad', ContentFile(file.read()))
 
     # get parameters from request
     parameters_string=request.data['parameters']
@@ -131,66 +132,20 @@ def getoutputfile(request, path):
 @api_view(['GET'])
 def taskresultview(request):
     """
-    Get task result: metadata, expression, umap
-    - taskid
-    - resulttype: metadata/expression/umap/batcheffect/casuality
+    Get task result: metadata, expression, umap, casuality
+    - taskid*
+    - resulttype*: metadata/expression/umap/batcheffect/casuality
     - metadata: page, pagesize (optional)
     - batcheffect: gene, compid (optional)
     - casuality: cluster (optional)
     """
     query_params = request.query_params.dict()
     taskid = query_params['taskid']
-    resulttype = query_params['resulttype']
-    taskobject = tasks.objects.filter(id=taskid)
-    serializer = taskSerializer(taskobject, many=True)
-    taskdata=serializer.data[0]
-    if resulttype == 'metadata':
-        #metadatafile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_meta.csv'
-        #test_meta_data
-        metadatafile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_meta_data.txt'
-        metadata = pd.read_csv(metadatafile,sep='\t', index_col=False)
-        count = metadata.shape[0]
-        rename_dict = {'Unnamed: 0': 'Cell_id',
-                    'orig.ident':'orig_ident',
-                    'Celltype..malignancy.': 'Celltype_malignancy',
-                    'Celltype..major.lineage.':'Celltype_major_lineage'}
-        metadata.rename(columns=rename_dict, inplace=True) # rename the first column
-        metadata=paginate_dataframe(metadata, int(query_params['page']), int(query_params['pagesize'])) # paginate the metadata
-        return Response({'results': metadata.to_dict(orient='records'), 'count': count})
-    elif resulttype == 'umap':
-        umapfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/test_umap_data.txt'
-        umappddata = pd.read_csv(umapfile, sep='\t', index_col=False)
-        rename_dict = {'Unnamed: 0': 'Cell_id',}
-        umappddata.rename(columns=rename_dict, inplace=True) # rename the first column
-        return Response({'results': umappddata.to_dict(orient='records')})
-    elif resulttype == 'batcheffect':
-        #/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1711342584_1901/result/batch_effect/batch_effected_split
-        genelist,gene_path_dict=get_gene_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/batch_effect/batch_effected_split')
-        geneoption=[{'value':gene,'label':gene} for gene in genelist]
-        gene = query_params['gene'] if 'gene' in query_params else genelist[int(query_params['compid'])]
-        path=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/batch_effect/batch_effected_split/'+gene_path_dict[gene]
-        batcheffect_data=pd.read_csv(path,sep='\t',index_col=False,skiprows=1,header=None)
-        batcheffect_data.rename(columns={0: 'Cell_id',1:'Gene'}, inplace=True) 
-        return Response({'path':path,'results': batcheffect_data.to_dict(orient='records'),'geneoption': geneoption,'gene':gene})
-    elif resulttype == 'casuality':
-        #/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1711342584_1901/result/casuality
-        cluster_input_list,inputdict=get_cluster_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/input')
-        cluster_output_list,outputdict=get_cluster_list(local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/output')
-        clusteroption=[{'value':cluster,'label':"cluster_"+cluster} for cluster in cluster_input_list]
-        cluster = query_params.get('cluster', cluster_output_list[0])
-        inputpath=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/input/'+inputdict[cluster]
-        outputpath=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/casuality/output/'+outputdict[cluster]
-        inputcasuality_data=pd.read_csv(inputpath,sep=',',index_col=False)
-        outputcasuality_data=pd.read_csv(outputpath,sep=',',index_col=False)
-        rename_dict = {'Unnamed: 0': 'gene'}
-        inputcasuality_data.rename(columns=rename_dict, inplace=True) 
-        outputcasuality_data.rename(columns=rename_dict, inplace=True)
-        return Response({'results': {'inputdata':inputcasuality_data.to_dict(orient='records'),
-                                    'outputdata':outputcasuality_data.to_dict(orient='records')},
-                                    'clusteroption': clusteroption,'cluster':cluster})
-    else:
-        expressionfile=local_settings.USERTASKPATH+taskdata['userpath']+ '/result/scquery/sc_output_expression.csv'
-        expression = pd.read_csv(expressionfile, index_col=0)
-        return Response({'results': expression.to_dict(orient='records')})
-
+    taskobject = tasks.objects.get(id=taskid)
+    objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
+    with open(objectpath, 'rb') as f:
+        #载入模块对象
+        module = pickle.load(f)
+    res=module.getresult(query_params)
+    return Response(res)
 
