@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from task.models import tasks
+from task.models import tasks, SubTask
 from task.serializers import taskSerializer
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view
@@ -44,17 +44,41 @@ def createtask(request):
     - modulename
     - parameters
     """
+    print("receive request create task.")
+    print("METHOD:", request.method)
+    print("CONTENT_TYPE:", request.content_type)
+    print("DATA:", request.data)
+    print("FILES:", request.FILES)
+
     # create user task folder and save the file
     usertask_dir = str(int(time.time()))+'_' + str(random.randint(1000, 9999))
     userpath = local_settings.USERTASKPATH+usertask_dir
     uploadfilepath = userpath + '/upload/'
     os.makedirs(uploadfilepath, exist_ok=False)
-    file = request.FILES['submitfile']
-    default_storage.save(uploadfilepath+'input.h5ad', ContentFile(file.read()))
+    # file = request.FILES['submitfile']
+    # default_storage.save(uploadfilepath+'input.h5ad', ContentFile(file.read()))
+    # 确保 request.FILES 中有 'submitfile'
+    if 'submitfile' in request.FILES:
+        try:
+            file = request.FILES['submitfile']
+            
+            with open(os.path.join(uploadfilepath, 'input.h5ad'), 'wb+') as destination:
+                for chunk in file.chunks():
+                    destination.write(chunk)
+            print("File saved successfully:", uploadfilepath + 'input.h5ad')
+        except Exception as e:
+            print("Upload error:", e)
+            return Response({'status': 'Failed', 'message': f'File upload failed: {str(e)}'}, status=500)
+
+        
+    else:
+        # 如果文件缺失，应返回错误
+        return Response({'status': 'Failed', 'message': 'File "submitfile" not found in request.'}, status=400)
+    # import shutil
+    # shutil.copy("/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1745249986_9226/upload/input.h5ad", uploadfilepath+'input.h5ad')
 
     # get parameters from request
     parameters_string=request.data['parameters']
-    print(parameters_string)
     parameters_dict = json.loads(parameters_string)
 
     # create task object
@@ -141,6 +165,14 @@ def taskresultview(request):
     """
     query_params = request.query_params.dict()
     taskid = query_params['taskid']
+    if 'testmode' in query_params and query_params['testmode'] == 'true':
+        print("testmode")
+        objectpath = local_settings.USERTASKPATH + 'demo_result/scst/moduleobject.pkl'
+        with open(objectpath, 'rb') as f:
+            #载入模块对象
+            module = pickle.load(f)
+        res = module.gettestresult(query_params)
+        return Response(res)
     taskobject = tasks.objects.get(id=taskid)
     objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
     with open(objectpath, 'rb') as f:
@@ -149,3 +181,189 @@ def taskresultview(request):
     res=module.getresult(query_params)
     return Response(res)
 
+
+@api_view(['GET'])
+def getImg(request):
+    taskid = request.query_params.get('task_id')
+    image_analysis_type = request.query_params.get('image_analysis_type')
+    image_id = request.query_params.get('image_id')
+    
+    taskobject = tasks.objects.get(id=taskid)
+    objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
+    with open(objectpath, 'rb') as f:
+        #载入模块对象
+        module = pickle.load(f)
+    img_path = ''
+    
+    if image_analysis_type == "he":
+        query_params = {'resulttype': "img_path", 'analysis_type': "he",  'img_id': image_id}
+        img_path=module.getresult(query_params)
+        if img_path:
+            if os.path.exists(img_path):
+                return FileResponse(open(img_path, 'rb'), content_type='image/png')
+            else:
+                return Response({'error': 'Image not found'}, status=404)
+        else:
+            return Response({'message': "No image for this dataset."})
+    else:
+        return Response({'message': f"No such analysis_type {image_analysis_type}"})
+    
+@api_view(['POST'])
+def create_subtask(request):
+    """
+    创建 scst 子任务（硬编码 SubScstquery 模块，自理目录/文件）
+    - taskid (主任务 ID)
+    - userid
+    - dataset_path (数据集 ID)
+    - subtasktype (子任务类型，如 "xx1")
+    - parameters (JSON 字符串，e.g., {"k": 10, "sub_type": "hierarchical"})
+    """
+    res = {}
+    taskid = request.data.get('taskid')
+    userid = request.data.get('userid')
+    dataset_path = request.data.get('dataset_path')  # 新增：数据集 ID
+    subtasktype = request.data.get('subtasktype')
+    print(taskid, userid, dataset_path, subtasktype)
+    if not taskid or not userid or not dataset_path or not subtasktype:
+        res['status'] = 'Failed'
+        res['message'] = '缺少 taskid、userid、dataset_path 或 subtasktype'
+        return Response(res, status=400)
+
+    try:
+        main_task = tasks.objects.get(id=taskid, user=userid)
+        # if main_task.status != 'Completed':
+        #     return Response({'status': 'Failed', 'message': '主任务未完成'}, status=400)
+    except tasks.DoesNotExist:
+        res['status'] = 'Failed'
+        res['message'] = '任务不存在'
+        return Response(res, status=404)
+
+    # 解析参数，并加路径信息（供模块用）
+    parameters_string = request.data.get('parameters')
+    if not parameters_string:
+        res['status'] = 'Failed'
+        res['message'] = '缺少 parameters'
+        return Response(res, status=400)
+    parameters_dict = json.loads(parameters_string)
+    usertask_dir = main_task.userpath
+    parameters_dict['userid'] = userid
+
+    # 创建子任务记录
+    new_subtask = SubTask.objects.create(
+        main_task=main_task,
+        subtask_type=subtasktype,
+        dataset_path=dataset_path,
+        status='Created',
+        parameters=parameters_dict
+    )
+
+    # 硬编码加载 SubScstquery 模块
+    try:
+        def get_class_from_module(module, class_name):
+            return getattr(module, class_name, None)
+
+        cls = get_class_from_module(utils.analysis, 'SubScstquery')  # 硬编码类名
+        if cls is None:
+            raise ValueError('SubScstquery 模块未找到')
+
+        # 模块自理目录/文件：传子任务名 + params (含路径)
+        new_submodule = cls(subtasktype, usertask_dir, dataset_path, parameters_dict)  # __init__(name, params)
+        job_id = new_submodule.process()
+        print(job_id)
+
+        # 保存状态/文件
+        new_subtask.job_id = job_id
+        new_subtask.status = 'Running'
+        new_subtask.save()
+
+        # taskdetailjson = [{'subtasktype': subtasktype, 'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
+        # with open(new_submodule.path + '/taskdetail.json', 'w') as f:
+        #     json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
+        # with open(new_submodule.path + '/moduleobject.pkl', 'wb') as f:
+        #     pickle.dump(new_submodule, f)
+
+        res['status'] = 'Success'
+        res['message'] = '子任务创建成功'
+        res['data'] = {'subtaskid': new_subtask.id, 'sub_dir': new_submodule.path}
+    except Exception as e:
+        res['status'] = 'Failed'
+        res['message'] = f'子任务创建失败：{str(e)}'
+        new_subtask.status = 'Failed'
+        new_subtask.save()
+        traceback.print_exc()
+
+    return Response(res)
+
+# view.py
+@api_view(['GET'])
+def subtask_status_update(request):
+    # for subtask in SubTask.objects.all().order_by('-id'):
+    #     print(f"ID: {subtask.id}, Main ID: {subtask.main_task.id}, Type: {subtask.subtask_type}, Status: {subtask.status}")
+    # return
+    """
+    按需获取并更新子任务的实时状态 (不依赖 PKL 文件)。
+    参数: subtaskid
+    """
+    subtaskid = request.query_params.get('subtaskid')
+    FINAL_STATES = ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL']
+    res = {'status': 'Failed', 'message': 'Invalid request.'}
+
+    if not subtaskid:
+        res['message'] = '缺少 subtaskid 参数。'
+        return Response(res, status=400)
+
+    try:
+        subtask = SubTask.objects.get(id=subtaskid)
+        current_db_status = subtask.status
+        job_id = subtask.job_id
+
+    except SubTask.DoesNotExist:
+        res['message'] = f'ID 为 {subtaskid} 的子任务不存在。'
+        return Response(res, status=404)
+
+    # 1. 如果数据库状态已经是终态，直接返回
+    if current_db_status in FINAL_STATES:
+        return Response({
+            'status': 'Success',
+            'current_status': current_db_status,
+            'job_id': job_id
+        })
+        
+    # 2. 如果 job_id 为空，但状态不是终态，可能是提交失败
+    if not job_id:
+        # 如果是这种情况，需要根据您业务定义是返回 Failed 还是 Pending
+        return Response({'status': 'Success', 'current_status': current_db_status, 'message': '任务 Job ID 丢失。'})
+
+    # 3. 状态需要更新 (非终态且有 job_id)
+    try:
+        # 直接调用 SLURM API 查询实时状态
+        new_slurm_status = slurm_api.get_job_status(job_id)
+        
+        # 如果 SLURM API 返回 None 或空字符串，说明任务可能还在处理中，保持当前数据库状态
+        if not new_slurm_status:
+             return Response({
+                'status': 'Success',
+                'current_status': current_db_status,
+                'job_id': job_id,
+                'message': 'SLURM 状态暂时无法查询，维持当前状态。'
+            })
+             
+        # SLURM 状态通常是大写，保持一致性
+        new_slurm_status = new_slurm_status.upper() 
+
+        # 4. 更新数据库
+        if new_slurm_status != current_db_status:
+            subtask.status = new_slurm_status
+            subtask.save()
+        
+        return Response({
+            'status': 'Success',
+            'current_status': new_slurm_status,
+            'job_id': job_id,
+            'message': f'状态已更新至 {new_slurm_status}'
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        res['message'] = f'SLURM 状态查询失败: {str(e)}'
+        return Response(res, status=500)

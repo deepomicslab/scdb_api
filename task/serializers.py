@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from task.models import tasks
+from task.models import tasks, SubTask
 
 
     # name = models.CharField(max_length=300, blank=True, null=True)
@@ -14,6 +14,15 @@ from task.models import tasks
     # created_at = models.DateTimeField(auto_now_add=True)
 
 class taskSerializer(serializers.ModelSerializer):
+    # subtasks = serializers.SerializerMethodField()
     class Meta:
         model = tasks
         fields = ['id','name', 'user', 'userpath', 'task_type', 'modulelist', 'status', 'created_at']
+    
+    # def get_subtasks(self, obj):
+    #     return [{'id': st.id, 'subtask_type': st.subtask_type, 'dataset_id': st.dataset_id, 'status': st.status} for st in obj.subtasks.all()]
+
+class SubTaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubTask
+        fields = '__all__'

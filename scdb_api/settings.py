@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'django_crontab',
     'django_extensions',
     'task',
+    'dataset',
 ]
 
 MIDDLEWARE = [
@@ -149,3 +150,7 @@ REST_FRAMEWORK = {
 CRONJOBS = [
     ('*/1 * * * *', 'task.cron.task_status_updata')
 ]
+
+import os
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")

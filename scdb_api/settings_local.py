@@ -10,7 +10,6 @@ DATABASES = {
 APIURL = 'https://scdbapi.deepomics.org/'
 FILEAPI='https://scdbapi.deepomics.org/tasks/getoutputfile/'
 
-
 USERTASKPATH = 'workspace/user_data/'
 SCDB_MODULE='/home/platform/project/scdb_platform/scdb_api/workspace/module/'
 SCQUERY_SCRIPT='/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old/run.sh'

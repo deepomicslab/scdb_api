@@ -1,2 +1,7 @@
 *.pyc
 workspace
+.Rhistory
+.RData
+.vscode/
+r_server.log
+media/

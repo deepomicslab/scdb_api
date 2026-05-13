@@ -19,7 +19,10 @@ from django.urls import path
 from task.views import taskViewSet
 from rest_framework import routers
 import task.views
+import dataset.views
 from django.urls import path, include
+from django.conf.urls.static import static
+from django.conf import settings
 
 router = routers.DefaultRouter()
 router.register('task', taskViewSet)
@@ -37,6 +40,23 @@ urlpatterns = [
     path('tasks/taskdetailview/', task.views.taskdetailview),
     #taskresultview
     path('tasks/taskresultview/', task.views.taskresultview),
+    #taskImg
+    path('tasks/getImg/', task.views.getImg),
+    #subtask create
+    path('tasks/createsubtask/', task.views.create_subtask),
+    path('tasks/subtask/status/', task.views.subtask_status_update),
+    
+    # path('dataset/index/', dataset.views.index_data),
+    path('dataset/index/stats/global/', dataset.views.global_stats),    # 顶部数据
+    path('dataset/index/stats/organs/', dataset.views.organ_stats),     # 左侧器官列表 & 柱状图
+    path('dataset/index/list/', dataset.views.dataset_list),            # 底部表格
+    path('dataset/index/stats/celltypes/', dataset.views.celltype_stats),
+    
+    path('dataset/detail/<str:dataset_id>/info/', dataset.views.detail_info),
+    path('dataset/detail/<str:dataset_id>/scatter/', dataset.views.detail_scatter),
+    path('dataset/download/<str:dataset_id>/', dataset.views.download_h5ad),
 ]
+
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 
