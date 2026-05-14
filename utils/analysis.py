@@ -4,6 +4,7 @@ import pandas as pd
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 import os
+import glob
 import json
 from django.http import HttpResponse
 import numpy as np
@@ -456,20 +457,24 @@ class Scstquery(Module):
     #     return res
     
     def getHEScatterresult(self, result):
-        # result_path = os.path.join(self.path, 'result/he/all_merged_data_with_labels.csv')
         result_path = os.path.join(self.path, "result/he/all_merged_data_with_labels.csv")
-        # cluster_celltype_distribution_filepath = os.path.join(self.path, "result/he/cluster_celltype_distribution.json")
         cluster_celltype_distribution_filepath = os.path.join(self.path, "result/he/cluster_celltype_distribution.json")
+        if not os.path.exists(result_path):
+            return {'status': 'fail', 'message': f'HE scatter data not found: {result_path}'}
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
-        with open(cluster_celltype_distribution_filepath, 'r') as json_file:
-            cluster_celltype_distribution_data = json.load(json_file)
+        cluster_celltype_distribution_data = {}
+        if os.path.exists(cluster_celltype_distribution_filepath):
+            with open(cluster_celltype_distribution_filepath, 'r') as json_file:
+                cluster_celltype_distribution_data = json.load(json_file)
         res = {'scatter': query_count_result.to_dict(orient='index'), 'cluster_celltype_distribution': cluster_celltype_distribution_data, 'status': 'success'}
         return res
     
     def getQueryCountHeatmapResult(self, dataset):
         result_path = os.path.join(self.path, 'result/he/all_merged_data_with_labels.csv')
+        if not os.path.exists(result_path):
+            return {'status': 'fail', 'message': f'HE query count data not found: {result_path}'}
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
@@ -479,16 +484,15 @@ class Scstquery(Module):
     def getHierarchicalClusteringQueryCelltypes(self, dataset):
         hierarchicalClustering_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering')
         celltypes = []
-        for file_name in os.listdir(hierarchicalClustering_dir_path):
-            if file_name.endswith("_merged_data_with_labels.csv"):  # 确保是目标文件
-                # 提取 cluster 和 _merged_data_with_labels.csv 之间的部分
-                start = file_name.find("cluster") + len("cluster")
-                end = file_name.find("_merged_data_with_labels.csv")
-                if start != -1 and end != -1:
-                    extracted_part = file_name[start:end]
-                    # 替换下划线为空格
-                    celltype = extracted_part.replace("_", " ").strip()
-                    celltypes.append(celltype)
+        if os.path.isdir(hierarchicalClustering_dir_path):
+            for file_name in os.listdir(hierarchicalClustering_dir_path):
+                if file_name.endswith("_merged_data_with_labels.csv"):
+                    start = file_name.find("cluster") + len("cluster")
+                    end = file_name.find("_merged_data_with_labels.csv")
+                    if start != -1 and end != -1:
+                        extracted_part = file_name[start:end]
+                        celltype = extracted_part.replace("_", " ").strip()
+                        celltypes.append(celltype)
         res = {'hierarchicalClusteringQueryCelltypes': celltypes,  'status': 'success'}
         return res
         
@@ -499,22 +503,27 @@ class Scstquery(Module):
         HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
+        if not os.path.exists(file_path):
+            return {'status': 'fail', 'message': f'File not found: {file_path}'}
         cluster_HierarchicalClustering_query_count_result = pd.read_csv(file_path, index_col=0)
         cluster_HierarchicalClustering_query_count_result = cluster_HierarchicalClustering_query_count_result.replace({np.nan: None})
-        # 移除 clusters 列
         if 'clusters' in cluster_HierarchicalClustering_query_count_result.columns:
             cluster_HierarchicalClustering_query_count_result = cluster_HierarchicalClustering_query_count_result.drop(columns=['clusters'])
         res = {'scatter': cluster_HierarchicalClustering_query_count_result.to_dict(orient='index'), 'status': 'success'}
         return res
     
     def getHierarchicalClusteringMarkerGenes(self, dataset, cluster):
-        file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
-        expression_df = pd.read_csv(file_path, index_col=0)
+        expression_file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
+        if not os.path.exists(expression_file_path):
+            return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
+        expression_df = pd.read_csv(expression_file_path, index_col=0)
         
         HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
-        file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
-        cluster_HierarchicalClustering_query_count_result = pd.read_csv(file_path, index_col=0)
+        cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
+        if not os.path.exists(cluster_file_path):
+            return {'status': 'fail', 'message': f'File not found: {cluster_file_path}'}
+        cluster_HierarchicalClustering_query_count_result = pd.read_csv(cluster_file_path, index_col=0)
         
         st_names = cluster_HierarchicalClustering_query_count_result.index.tolist()
         
@@ -573,13 +582,17 @@ class Scstquery(Module):
         
     
     def getHierarchicalClusteringMarkerGeneExpressions(self, dataset, cluster, gene):
-        file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
-        expression_df = pd.read_csv(file_path, index_col=0)
+        expression_file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
+        if not os.path.exists(expression_file_path):
+            return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
+        expression_df = pd.read_csv(expression_file_path, index_col=0)
         
         HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
-        file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
-        cluster_HierarchicalClustering_query_count_result = pd.read_csv(file_path, index_col=0)
+        cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
+        if not os.path.exists(cluster_file_path):
+            return {'status': 'fail', 'message': f'File not found: {cluster_file_path}'}
+        cluster_HierarchicalClustering_query_count_result = pd.read_csv(cluster_file_path, index_col=0)
         
         st_names = cluster_HierarchicalClustering_query_count_result.index.tolist()
         
@@ -774,9 +787,24 @@ class Scstquery(Module):
     
     def _find_cellchat_rds(self, dataset):
         """根据 dataset (UUID) 定位 subtask_cellchat 的 RDS 文件"""
+        if getattr(self, '_is_demo', False):
+            rds_files = glob.glob(os.path.join(self.path, 'result', 'cellchat', '*.rds'))
+            return rds_files[0] if rds_files else None
+        if not dataset:
+            raise ValueError('dataset is required')
         rds_path = os.path.join(self.path, f'dataset_{dataset}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
         if os.path.exists(rds_path):
             return rds_path
+        # dataset 可能是 DB 的 dataset_id, 但磁盘目录用的是 title(UUID)
+        # 尝试查 DB 转换
+        try:
+            db_obj = Dataset.objects.filter(dataset_id=dataset).first()
+            if db_obj:
+                rds_path = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
+                if os.path.exists(rds_path):
+                    return rds_path
+        except Exception:
+            pass
         return None
 
     def getCellChatPathways(self, dataset=None):
@@ -1187,6 +1215,7 @@ class Scstquery(Module):
 
     def gettestresult(self,query_params):
         self.path = local_settings.USERTASKPATH + 'demo_result/scst'
+        self._is_demo = True
         print(self.path)
         resulttype = query_params.get('resulttype')
         if resulttype == 'metadata':
