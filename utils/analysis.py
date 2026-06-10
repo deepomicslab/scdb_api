@@ -64,7 +64,7 @@ class Module:
             self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments)
         else:
             dependencies_jobs = [dependency.job_id for dependency in self.dependencies if dependency.job_id is not None]
-            self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments,dependencies_job_ids=dependencies_jobs)
+            self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments,dependency_job_ids=dependencies_jobs)
         self.status = 'Running'
         return self.job_id
 
@@ -464,6 +464,7 @@ class Scstquery(Module):
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
+        query_count_result = query_count_result.replace({np.nan: None})
         cluster_celltype_distribution_data = {}
         if os.path.exists(cluster_celltype_distribution_filepath):
             with open(cluster_celltype_distribution_filepath, 'r') as json_file:
@@ -478,6 +479,7 @@ class Scstquery(Module):
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
+        query_count_result = query_count_result.replace({np.nan: None})
         res = {'scatter': query_count_result.to_dict(orient='index'), 'status': 'success'}
         return res
         
@@ -547,40 +549,10 @@ class Scstquery(Module):
         return res
     
     def getHierarchicalClusteringStatus(self):
-        file_path = os.path.join(self.path, 'taskdetail.json')
-        
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                json_content = f.read()
-                
-                data = json.loads(json_content)
+        dir_path = os.path.join(self.path, "result/he/HierarchicalClustering")
+        has_data = os.path.isdir(dir_path) and len(os.listdir(dir_path)) > 0
+        return {"hierarchicalCluster_status": has_data, "status": "success"}
 
-                first_item = data[0]
-                parameters_dict = first_item['parameters_dict']
-                hierarchical_cluster_value = parameters_dict['hierarchicalCluster']
-                
-                res = {'hierarchicalCluster_status': hierarchical_cluster_value, 'status': 'success'}
-                return res
-                
-        except FileNotFoundError:
-            print(f"Error: File '{file_path}' not found. Please check the file path.")
-            res = {'status': 'fail', 'message': f"File '{file_path}' not found."}
-        except json.JSONDecodeError:
-            print(f"Error: Invalid JSON format in file '{file_path}'.")
-            res = {'status': 'fail', 'message': f"Invalid JSON format in file '{file_path}'."}
-        except IndexError:
-            print(f"Error: JSON list is empty or the structure is not as expected.")
-            res = {'status': 'fail', 'message': "JSON list is empty or the structure is not as expected."}
-        except KeyError as e:
-            print(f"Error: Expected key '{e}' not found. JSON structure might not be as expected.")
-            res = {'status': 'fail', 'message': f"Expected key '{e}' not found in JSON."}
-        except Exception as e:
-            print(f"An unknown error occurred: {e}")
-            res = {'status': 'fail', 'message': f"An unknown error occurred: {e}"}
-            
-        return res
-        
-    
     def getHierarchicalClusteringMarkerGeneExpressions(self, dataset, cluster, gene):
         expression_file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
         if not os.path.exists(expression_file_path):
@@ -1300,6 +1272,7 @@ class SubScstquery(Module):
     def __init__(self, subtask_type, root_dir, dataset_path, params):
         # 自理目录：/user_dir/dataset_path/subtask_name
         self.params = params
+        self.subtask_type = subtask_type
         userid = params['userid']  # 假设传 userid（或从 main_userpath 解析）
         super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
@@ -1342,10 +1315,25 @@ class SubScstquery(Module):
         inputfilepath = main_input_h5ad_path
         outputdir = self.path + '/result/'
         projectname = params.get('projectname', 'default')
-        organs = params.get('organParts', 'default')
+        organs = params.get('organParts', '')
         if subtask_type == 'hierarchical':
             self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'hierarchical', organs]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical.sh'
+        elif subtask_type in ('recall_analysis', 'annotation_mapping'):
+            self.shell_script = local_settings.SCDB_MODULE + 'noop.sh'
+            self.script_arguments = []
+        elif subtask_type == 'hierarchical_clustering':
+            self.script_arguments = [
+                inputfilepath,
+                outputdir,
+                projectname + '_hierarchical',
+                '190',
+                '1.2',
+                'cell_type',
+                'true',
+                organs,
+            ]
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/run.sh'
         elif subtask_type == 'marker_genes':
             self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
@@ -1388,9 +1376,23 @@ class SubScstquery(Module):
         else:
             raise ValueError(f"不支持的小种类: {subtask_type}")
 
+    def process(self):
+        if self.subtask_type in ('recall_analysis', 'annotation_mapping'):
+            if self.dependencies:
+                return super().process()
+            self.status = 'Completed'
+            self.job_id = 'viewer_only'
+            return self.job_id
+        if self.subtask_type == 'hierarchical_clustering':
+            output_check = os.path.join(self.path, 'result/he/HierarchicalClustering')
+            if os.path.isdir(output_check) and os.listdir(output_check):
+                self.status = 'Completed'
+                self.job_id = 'skipped_existing'
+                return self.job_id
+        return super().process()
+
     def getresult(self, query_params):
-        # 自己实现：根据 sub_type 返回结果（示例，基于你的 Scstquery 方法）
-        sub_type = self.params.get('sub_type', 'default')  # params 是 self.params？ 需设 self.params = params
+        sub_type = self.params.get('sub_type', 'default')
         resulttype = query_params.get('resulttype')
         if sub_type == 'hierarchical':
             if resulttype == 'hierarchicalClusteringMarkerGenes':

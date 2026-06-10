@@ -268,6 +268,24 @@ def create_subtask(request):
 
         # 模块自理目录/文件：传子任务名 + params (含路径)
         new_submodule = cls(subtasktype, usertask_dir, dataset_path, parameters_dict)  # __init__(name, params)
+
+        # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
+        needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'annotation_mapping', 'commot')
+        if needs_hierarchical_clustering:
+            hc_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir, 'result/he/HierarchicalClustering')
+            if not (os.path.isdir(hc_result_dir) and os.listdir(hc_result_dir)):
+                hc_params = parameters_dict.copy()
+                hc_params['sub_type'] = 'hierarchical_clustering'
+                # Ensure these come from frontend or default to empty (search all)
+                if 'organParts' not in hc_params:
+                    hc_params['organParts'] = ''
+                if 'projectname' not in hc_params:
+                    hc_params['projectname'] = 'test'
+                hc_module = cls('hierarchical_clustering', usertask_dir, dataset_path, hc_params)
+                hc_job_id = hc_module.process()
+                if hc_job_id and hc_job_id != 'skipped_existing':
+                    new_submodule.add_dependency(hc_module)
+
         job_id = new_submodule.process()
         print(job_id)
 
@@ -338,6 +356,8 @@ def subtask_status_update(request):
     try:
         # 直接调用 SLURM API 查询实时状态
         new_slurm_status = slurm_api.get_job_status(job_id)
+        if new_slurm_status:
+            new_slurm_status = new_slurm_status.rstrip("+")
         
         # 如果 SLURM API 返回 None 或空字符串，说明任务可能还在处理中，保持当前数据库状态
         if not new_slurm_status:
