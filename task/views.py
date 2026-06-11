@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from task.models import tasks, SubTask
+from dataset.models import Dataset
 from task.serializers import taskSerializer
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view
@@ -267,7 +268,19 @@ def create_subtask(request):
             raise ValueError('SubScstquery 模块未找到')
 
         # 模块自理目录/文件：传子任务名 + params (含路径)
-        new_submodule = cls(subtasktype, usertask_dir, dataset_path, parameters_dict)  # __init__(name, params)
+        # Resolve dataset UUID from Dataset model
+        dataset_id = request.data.get('dataset_id', '')
+        dataset_uuid = ''
+        st_h5ad_path = ''
+        if dataset_id:
+            try:
+                ds = Dataset.objects.get(dataset_id=dataset_id)
+                # Extract UUID from file_path: /data3/.../uuid/st_filtered_adata/...
+                dataset_uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+                st_h5ad_path = ds.file_path
+            except Dataset.DoesNotExist:
+                pass
+        new_submodule = cls(subtasktype, usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, parameters_dict)  # __init__(name, uuid, marker_path, params)
 
         # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
         needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'annotation_mapping', 'commot')
@@ -276,12 +289,11 @@ def create_subtask(request):
             if not (os.path.isdir(hc_result_dir) and os.listdir(hc_result_dir)):
                 hc_params = parameters_dict.copy()
                 hc_params['sub_type'] = 'hierarchical_clustering'
-                # Ensure these come from frontend or default to empty (search all)
                 if 'organParts' not in hc_params:
                     hc_params['organParts'] = ''
                 if 'projectname' not in hc_params:
                     hc_params['projectname'] = 'test'
-                hc_module = cls('hierarchical_clustering', usertask_dir, dataset_path, hc_params)
+                hc_module = cls('hierarchical_clustering', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hc_params)
                 hc_job_id = hc_module.process()
                 if hc_job_id and hc_job_id != 'skipped_existing':
                     new_submodule.add_dependency(hc_module)

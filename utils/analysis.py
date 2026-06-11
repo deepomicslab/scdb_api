@@ -286,7 +286,27 @@ class Scstquery(Module):
         except Exception as e:
              return {'status': 'fail', 'message': str(e)}
 
-        # 3. 数据转换与数据库关联
+        # 3. Load subtask info for this task
+        subtask_map = {}  # dataset_path -> {subtask_type: {id, status, job_id}}
+        try:
+            from task.models import SubTask, tasks as task_model
+            main_task = task_model.objects.get(userpath=self.path.replace(local_settings.USERTASKPATH, ''))
+            for st in SubTask.objects.filter(main_task=main_task).exclude(
+                subtask_type='hierarchical_clustering'
+            ).exclude(status='Created').order_by('-id'):
+                dp = st.dataset_path
+                if dp not in subtask_map:
+                    subtask_map[dp] = {}
+                if st.subtask_type not in subtask_map[dp]:
+                    subtask_map[dp][st.subtask_type] = {
+                        'id': st.id,
+                        'status': st.status.lower(),
+                        'job_id': st.job_id,
+                    }
+        except Exception:
+            pass
+
+        # 4. 数据转换与数据库关联
         transformed_data = {}
 
         for organ_name, datasets_dict in raw_data.items():
@@ -338,6 +358,9 @@ class Scstquery(Module):
                 new_value['title'] = new_key              # 显式添加 title 字段，方便前端
                 new_value['description'] = description    # 拼装好的描述
                 new_value['meta'] = meta_info             # 详细元数据
+
+                # Attach subtask info
+                new_value['subtasks'] = subtask_map.get(original_path, {})
 
                 # 放入新的字典中
                 transformed_data[organ_name][new_key] = new_value
@@ -586,8 +609,36 @@ class Scstquery(Module):
 
         return res
     
+    def _get_commot_result_dir(self, dataset_name):
+        print(f"[commot] looking up dataset: {dataset_name}")
+        try:
+            from dataset.models import Dataset
+            ds = Dataset.objects.get(dataset_id=dataset_name)
+            uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+            result_dir = os.path.join(self.path, f'dataset_{uuid}', 'subtask_commot', 'result')
+            print(f"[commot] file_path: {ds.file_path}")
+            print(f"[commot] uuid: {uuid}")
+            print(f"[commot] result_dir: {result_dir}")
+            print(f"[commot] result_dir exists: {os.path.isdir(result_dir)}")
+            return result_dir
+        except Exception as e:
+            print(f"[commot] Dataset lookup failed: {e}")
+        return None
+
+    def _find_commot_file(self, result_dir, pattern='*_LR.h5ad'):
+        import glob
+        if not result_dir or not os.path.isdir(result_dir):
+            print(f"[commot] result_dir not found: {result_dir}")
+            return None
+        files = glob.glob(os.path.join(result_dir, pattern))
+        print(f"[commot] found {len(files)} files: {[os.path.basename(f) for f in files]}")
+        return files[0] if files else None
+
     def getLRPairs(self, dataset):
-        file_path = os.path.join(self.path, 'result/commot/test_result.h5ad')
+        result_dir = self._get_commot_result_dir(dataset)
+        file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
+        if not file_path:
+            return {'LR_pairs': [], 'status': 'error', 'message': f'Commot result not found for {dataset}'}
         if not os.path.exists(file_path):
             return {'LR_pairs': [], 'status': 'error', 'message': f'File not found: {file_path}'}
         adata = sc.read(file_path)
@@ -598,7 +649,10 @@ class Scstquery(Module):
         return res
 
     def getReceivedSignalStrength(self, dataset, lr_pair):
-        file_path = os.path.join(self.path, 'result/commot/test_result.h5ad')
+        result_dir = self._get_commot_result_dir(dataset)
+        file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
+        if not file_path:
+            return {'receiver_strength': {}, 'status': 'error', 'message': f'Commot result not found for {dataset}'}
         if not os.path.exists(file_path):
             return {'receiver_strength': {}, 'status': 'error', 'message': f'File not found: {file_path}'}
         adata = sc.read(file_path)
@@ -1269,7 +1323,7 @@ class Scstquery(Module):
             return {'results': expression.to_dict(orient='records')}
         
 class SubScstquery(Module):
-    def __init__(self, subtask_type, root_dir, dataset_path, params):
+    def __init__(self, subtask_type, root_dir, dataset_uuid, dataset_path, st_h5ad_path, params):
         # 自理目录：/user_dir/dataset_path/subtask_name
         self.params = params
         self.subtask_type = subtask_type
@@ -1277,31 +1331,15 @@ class SubScstquery(Module):
         super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
         print("user_main_dir", user_main_dir)
-        dataset_id = None
-        if dataset_path:
-            # 1. 以 '/' 分割路径
-            path_parts = dataset_path.split('/')
-            
-            # 2. 移除空字符串（例如，路径以 / 开头或结尾）
-            path_parts = [part for part in path_parts if part] 
 
-            if len(path_parts) >= 3:
-                # 倒数第三个元素的索引是 -3
-                dataset_id = path_parts[-3]
-            else:
-                # 路径格式不符合预期，可以记录错误
-                print(f"ERROR: Cannot extract dataset_id from path: {dataset_path}")
-                # 返回失败或使用默认值，取决于业务需求
-        
-        sub_dir = f"dataset_{dataset_id}/subtask_{subtask_type.replace(' ', '_')}"  # e.g., "dataset_102/xx1"
-        self.path = os.path.join(user_main_dir, sub_dir)
-        print(self.path)
-        os.makedirs(self.path, exist_ok=True)  # 创建用户目录
-        # os.makedirs(self.path + '/upload/', exist_ok=True)  # 创建子 upload
-        
-        # 确保子任务目录结构存在
-        os.makedirs(os.path.join(self.path, 'upload'), exist_ok=True)
-        os.makedirs(os.path.join(self.path, 'result'), exist_ok=True)
+        if dataset_uuid:
+            sub_dir = f"dataset_{dataset_uuid}/subtask_{subtask_type.replace(' ', '_')}"
+            self.path = os.path.join(user_main_dir, sub_dir)
+            print(self.path)
+            os.makedirs(self.path, exist_ok=True)
+            os.makedirs(os.path.join(self.path, 'upload'), exist_ok=True)
+            os.makedirs(os.path.join(self.path, 'result'), exist_ok=True)
+
 
 
         # 2. 关键：数据继承/文件复制
@@ -1338,9 +1376,9 @@ class SubScstquery(Module):
             self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
         elif subtask_type == "commot":
-            scst_h5adpath = "/data3/platform/sc_db/scgpt/data/cellxgene/st/lung/dfbedaf2-1af4-416c-b63a-d6af65a851f8.h5ad" # $1: TODO 改成sc-st文件路径
+            # st_h5ad_path comes from Dataset model via views.py
             self.script_arguments = [
-                scst_h5adpath,
+                st_h5ad_path,
                 outputdir
             ]
             self.shell_script = "/data3/platform/sc_db/commot/run_commot.sh"
