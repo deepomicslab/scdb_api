@@ -479,8 +479,23 @@ class Scstquery(Module):
     #     res={'scatter': scatter_data.to_dict(orient='records'), 'datasets': keys_array, 'cluster_celltype_distribution': cluster_celltype_distribution_data.to_dict(orient='records'), 'status': 'success'}
     #     return res
     
+    def _resolve_subtask_he_path(self, dataset_id, subtask_type='hierarchical_clustering'):
+        if not dataset_id:
+            return None
+        try:
+            ds = Dataset.objects.get(dataset_id=dataset_id)
+            uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+            he_dir = os.path.join(self.path, f'dataset_{uuid}', f'subtask_{subtask_type}', 'result', 'he')
+            if os.path.isdir(he_dir):
+                return he_dir
+        except Dataset.DoesNotExist:
+            pass
+        return None
+
     def getHEScatterresult(self, result):
-        result_path = os.path.join(self.path, "result/he/all_merged_data_with_labels.csv")
+        subtask_he = self._resolve_subtask_he_path(result, 'annotation_mapping')
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        result_path = os.path.join(base, "all_merged_data_with_labels.csv")
         cluster_celltype_distribution_filepath = os.path.join(self.path, "result/he/cluster_celltype_distribution.json")
         if not os.path.exists(result_path):
             return {'status': 'fail', 'message': f'HE scatter data not found: {result_path}'}
@@ -496,7 +511,9 @@ class Scstquery(Module):
         return res
     
     def getQueryCountHeatmapResult(self, dataset):
-        result_path = os.path.join(self.path, 'result/he/all_merged_data_with_labels.csv')
+        subtask_he = self._resolve_subtask_he_path(dataset)
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        result_path = os.path.join(base, 'all_merged_data_with_labels.csv')
         if not os.path.exists(result_path):
             return {'status': 'fail', 'message': f'HE query count data not found: {result_path}'}
         query_count_result = pd.read_csv(result_path, index_col=0)
@@ -507,7 +524,9 @@ class Scstquery(Module):
         return res
         
     def getHierarchicalClusteringQueryCelltypes(self, dataset):
-        hierarchicalClustering_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering')
+        subtask_he = self._resolve_subtask_he_path(dataset)
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        hierarchicalClustering_dir_path = os.path.join(base, 'HierarchicalClustering')
         celltypes = []
         if os.path.isdir(hierarchicalClustering_dir_path):
             for file_name in os.listdir(hierarchicalClustering_dir_path):
@@ -525,7 +544,9 @@ class Scstquery(Module):
         # 返回的是一个dict，里面是每个cluster/类型对应的sc query st的搜索结果的路径（放到另一个接口）
         # 返回层次聚类的某个clustercluster/类型的sc query st对应的搜索结果，里面有st出现的次数
         # TODO 这里要考虑不同dataset的情况
-        HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
+        subtask_he = self._resolve_subtask_he_path(dataset)
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        HierarchicalClustering_result_dir_path = os.path.join(base, 'HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
         if not os.path.exists(file_path):
@@ -538,12 +559,13 @@ class Scstquery(Module):
         return res
     
     def getHierarchicalClusteringMarkerGenes(self, dataset, cluster):
-        expression_file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
+        subtask_he = self._resolve_subtask_he_path(dataset)
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        expression_file_path = os.path.join(base, 'gene_expression.csv')
         if not os.path.exists(expression_file_path):
             return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
         expression_df = pd.read_csv(expression_file_path, index_col=0)
-        
-        HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
+        HierarchicalClustering_result_dir_path = os.path.join(base, 'HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
         if not os.path.exists(cluster_file_path):
@@ -577,12 +599,13 @@ class Scstquery(Module):
         return {"hierarchicalCluster_status": has_data, "status": "success"}
 
     def getHierarchicalClusteringMarkerGeneExpressions(self, dataset, cluster, gene):
-        expression_file_path = os.path.join(self.path, 'result/he/markergeneexpression/output_600_marker_gene_expression.csv')
+        subtask_he = self._resolve_subtask_he_path(dataset)
+        base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
+        expression_file_path = os.path.join(base, 'gene_expression.csv')
         if not os.path.exists(expression_file_path):
             return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
         expression_df = pd.read_csv(expression_file_path, index_col=0)
-        
-        HierarchicalClustering_result_dir_path = os.path.join(self.path, 'result/he/HierarchicalClustering/')
+        HierarchicalClustering_result_dir_path = os.path.join(base, 'HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
         if not os.path.exists(cluster_file_path):
@@ -1357,9 +1380,18 @@ class SubScstquery(Module):
         if subtask_type == 'hierarchical':
             self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'hierarchical', organs]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical.sh'
-        elif subtask_type in ('recall_analysis', 'annotation_mapping'):
-            self.shell_script = local_settings.SCDB_MODULE + 'noop.sh'
-            self.script_arguments = []
+        elif subtask_type == 'annotation_mapping':
+            output_json = os.path.join(user_main_dir, 'result/sc_query/output.json')
+            projectname = params.get('projectname', 'default')
+            hc_csv = os.path.join(user_main_dir, 'result/sc_marker', f'{projectname}_hierarchical_clusters.csv')
+            if os.path.exists(hc_csv):
+                celltype_count_dic = hc_csv
+            else:
+                celltype_count_dic = os.path.join(user_main_dir, 'result/sc_marker', f'{projectname}_clusters.csv')
+            self.script_arguments = [output_json, dataset_path, outputdir, celltype_count_dic]
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_annotation_mapping.sh'
+        elif subtask_type == 'recall_analysis':
+            pass  # viewer type, data served by hierarchical_clustering subtask
         elif subtask_type == 'hierarchical_clustering':
             self.script_arguments = [
                 inputfilepath,
@@ -1370,6 +1402,7 @@ class SubScstquery(Module):
                 'cell_type',
                 'true',
                 organs,
+                dataset_path,
             ]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/run.sh'
         elif subtask_type == 'marker_genes':
@@ -1415,9 +1448,11 @@ class SubScstquery(Module):
             raise ValueError(f"不支持的小种类: {subtask_type}")
 
     def process(self):
-        if self.subtask_type in ('recall_analysis', 'annotation_mapping'):
+        if self.subtask_type == 'recall_analysis':
             if self.dependencies:
-                return super().process()
+                self.status = 'Pending'
+                self.job_id = 'pending_hc'
+                return self.job_id
             self.status = 'Completed'
             self.job_id = 'viewer_only'
             return self.job_id

@@ -248,6 +248,8 @@ def create_subtask(request):
     parameters_dict = json.loads(parameters_string)
     usertask_dir = main_task.userpath
     parameters_dict['userid'] = userid
+    if 'projectname' not in parameters_dict:
+        parameters_dict['projectname'] = 'test'
 
     # 创建子任务记录
     new_subtask = SubTask.objects.create(
@@ -283,9 +285,9 @@ def create_subtask(request):
         new_submodule = cls(subtasktype, usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, parameters_dict)  # __init__(name, uuid, marker_path, params)
 
         # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
-        needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'annotation_mapping', 'commot')
+        needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'commot')
         if needs_hierarchical_clustering:
-            hc_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir, 'result/he/HierarchicalClustering')
+            hc_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir, f'dataset_{dataset_uuid}', 'subtask_hierarchical_clustering', 'result', 'he', 'HierarchicalClustering')
             if not (os.path.isdir(hc_result_dir) and os.listdir(hc_result_dir)):
                 hc_params = parameters_dict.copy()
                 hc_params['sub_type'] = 'hierarchical_clustering'
@@ -297,13 +299,26 @@ def create_subtask(request):
                 hc_job_id = hc_module.process()
                 if hc_job_id and hc_job_id != 'skipped_existing':
                     new_submodule.add_dependency(hc_module)
+                    # Create HC SubTask record and store in viewer params for tracking
+                    hc_subtask = SubTask.objects.create(
+                        main_task=main_task,
+                        subtask_type='hierarchical_clustering',
+                        dataset_path=dataset_path,
+                        status='Running',
+                        job_id=hc_job_id,
+                        parameters=hc_params
+                    )
+                    parameters_dict['_hc_subtask_id'] = hc_subtask.id
+                    parameters_dict['_hc_job_id'] = hc_job_id
+                    print(f'Auto-created HC subtask id={hc_subtask.id}, job_id={hc_job_id}')
 
         job_id = new_submodule.process()
         print(job_id)
 
-        # 保存状态/文件
+        # 保存状态/文件（用 module 自身的 status，支持 viewer/pending 等非 Running 状态）
         new_subtask.job_id = job_id
-        new_subtask.status = 'Running'
+        new_subtask.status = new_submodule.status if new_submodule.status else 'Running'
+        new_subtask.parameters = parameters_dict
         new_subtask.save()
 
         # taskdetailjson = [{'subtasktype': subtasktype, 'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
@@ -359,12 +374,59 @@ def subtask_status_update(request):
             'job_id': job_id
         })
         
-    # 2. 如果 job_id 为空，但状态不是终态，可能是提交失败
+    # 2. 非 Slurm 作业类型（viewer/跳过），直接返回数据库状态
+    if job_id in ('viewer_only', 'skipped_existing'):
+        return Response({
+            'status': 'Success',
+            'current_status': current_db_status,
+            'job_id': job_id,
+            'message': 'Non-slurm task.'
+        })
+
+    # 2b. Pending viewer waiting for HC subtask to complete
+    if job_id == 'pending_hc' and subtask.subtask_type in ('recall_analysis', 'annotation_mapping'):
+        hc_subtask = SubTask.objects.filter(
+            main_task=subtask.main_task,
+            subtask_type='hierarchical_clustering',
+            dataset_path=subtask.dataset_path
+        ).order_by('-id').first()
+        if hc_subtask:
+            # Update HC status from Slurm if needed
+            if hc_subtask.status not in FINAL_STATES and hc_subtask.job_id and hc_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc'):
+                try:
+                    slurm_status = slurm_api.get_job_status(hc_subtask.job_id)
+                    if slurm_status:
+                        slurm_status = slurm_status.rstrip('+').upper()
+                        if slurm_status != hc_subtask.status:
+                            hc_subtask.status = slurm_status
+                            hc_subtask.save()
+                except Exception:
+                    pass
+        if hc_subtask and hc_subtask.status in ('Completed', 'COMPLETED'):
+            subtask.status = 'Completed'
+            subtask.job_id = 'viewer_only'
+            subtask.save()
+            return Response({
+                'status': 'Success',
+                'current_status': 'Completed',
+                'job_id': 'viewer_only',
+                'message': 'HC completed, viewer ready.'
+            })
+        hc_job = subtask.parameters.get('_hc_job_id', 'unknown')
+        return Response({
+            'status': 'Success',
+            'current_status': 'Pending',
+            'job_id': job_id,
+            'hc_job_id': hc_job,
+            'message': f'Waiting for HC subtask (job {hc_job}) to complete.'
+        })
+
+    # 3. 如果 job_id 为空，但状态不是终态，可能是提交失败
     if not job_id:
         # 如果是这种情况，需要根据您业务定义是返回 Failed 还是 Pending
         return Response({'status': 'Success', 'current_status': current_db_status, 'message': '任务 Job ID 丢失。'})
 
-    # 3. 状态需要更新 (非终态且有 job_id)
+    # 4. 状态需要更新 (非终态且有 job_id)
     try:
         # 直接调用 SLURM API 查询实时状态
         new_slurm_status = slurm_api.get_job_status(job_id)
