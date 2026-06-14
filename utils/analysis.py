@@ -692,9 +692,9 @@ class Scstquery(Module):
     
     def getNetworkData(self, dataset, type):
         if type == 'weight':
-            file_path = os.path.join(self.path, 'result/cellchat/network/result_data_weight.json')
+            file_path = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result", "cellchat/network/result_data_weight.json")
         elif type == 'count':
-            file_path = os.path.join(self.path, 'result/cellchat/network/result_data_count.json')
+            file_path = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result", "cellchat/network/result_data_count.json")
 
         if not os.path.exists(file_path):
             return {'network_data': {}, 'status': 'error', 'message': f'File not found: {file_path}'}
@@ -1431,7 +1431,7 @@ class SubScstquery(Module):
             output_filepath = os.path.join(outputdir, "cellchat_result.rds")
             
             self.script_arguments = [
-                "/data3/platform/sc_db/scgpt/data/cellxgene/st/lung/dfbedaf2-1af4-416c-b63a-d6af65a851f8.h5ad", # $1: TODO 改成sc-st文件路径
+                st_h5ad_path,        # $1: input h5ad (per-dataset)
                 output_filepath,      # $2: Output (建议把输出放前面，逻辑更顺)
                 groupby,              # $3: Groupby
                 db_mode,              # $4: DB Mode
