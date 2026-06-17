@@ -916,11 +916,21 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getSpiderInit(self):
+    def _find_spider_h5ad(self, dataset_id):
+        if dataset_id:
+            try:
+                ds = Dataset.objects.get(dataset_id=dataset_id)
+                uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+                return os.path.join(self.path, f'dataset_{uuid}', 'subtask_spider', 'result', 'adata_spider.h5ad')
+            except Dataset.DoesNotExist:
+                pass
+        return os.path.join(self.path, 'result/spider/adata_spider.h5ad')
+
+    def getSpiderInit(self, dataset=None):
         """
         SPIDER 接口1：初始化，返回 Metadata 和 Coordinates
         """
-        h5ad_path = os.path.join(self.path, 'result/spider/adata_spider.h5ad')
+        h5ad_path = self._find_spider_h5ad(dataset)
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
 
@@ -985,11 +995,11 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getSpiderPatternData(self, pattern_id):
+    def getSpiderPatternData(self, dataset=None, pattern_id=None):
         """
         SPIDER 接口2：获取指定 Pattern 的评分
         """
-        h5ad_path = os.path.join(self.path, 'result/spider/adata_spider.h5ad')
+        h5ad_path = self._find_spider_h5ad(dataset)
         try:
             if pattern_id is None:
                 raise ValueError("Pattern ID is required")
@@ -1010,11 +1020,11 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderLRData(self, lr_name):
+    def getSpiderLRData(self, dataset=None, lr_name=None):
         """
         SPIDER 接口3：获取指定 LR 的表达量
         """
-        h5ad_path = os.path.join(self.path, 'result/spider/adata_spider.h5ad')
+        h5ad_path = self._find_spider_h5ad(dataset)
         try:
             if not lr_name:
                 raise ValueError("LR Name is required")
@@ -1041,9 +1051,10 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderSpearmanData(self):
-        sc_path = os.path.join(self.path, 'result/spider/spearman/lr_level_spearman_correlation_sc.csv')
-        sc_st_path = os.path.join(self.path, 'result/spider/spearman/lr_level_spearman_correlation_sc_st.csv')
+    def getSpiderSpearmanData(self, dataset=None):
+        base_dir = os.path.join(self.path, f'dataset_{dataset}', 'subtask_spider', 'result') if dataset else os.path.join(self.path, 'result/spider')
+        sc_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc.csv')
+        sc_st_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc_st.csv')
         
         results = []
         
@@ -1257,6 +1268,14 @@ class Scstquery(Module):
             return self.getCellChatHeatmapData(query_params.get('LR_pair'), query_params.get('dataset'))
         elif resulttype == 'cellchat_lrpairs':
             return self.getCellChatLRPairs(query_params.get('dataset'))
+        elif resulttype == 'spider_init':
+            return self.getSpiderInit(query_params.get('dataset'))
+        elif resulttype == 'spider_pattern':
+            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'))
+        elif resulttype == 'spider_lr':
+            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'))
+        elif resulttype == 'spider_spearman':
+            return self.getSpiderSpearmanData(query_params.get('dataset'))
         else:
             expressionfile=self.path+ '/result/scquery/sc_output_expression.csv'
             expression = pd.read_csv(expressionfile, index_col=0)
@@ -1305,18 +1324,18 @@ class Scstquery(Module):
             return self.getCellChatLRPairs()
         elif resulttype == 'spider_init':
             # 获取元数据和坐标
-            return self.getSpiderInit()
+            return self.getSpiderInit(query_params.get('dataset'))
             
         elif resulttype == 'spider_pattern':
             # 获取特定 Pattern 的数值
-            return self.getSpiderPatternData(query_params.get('pattern_id'))
+            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'))
             
         elif resulttype == 'spider_lr':
             # 获取特定 LR 的数值
-            return self.getSpiderLRData(query_params.get('lr_name'))
+            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'))
         elif resulttype == 'spider_spearman':
             # --- 新增：Spearman 分析数据接口 ---
-            return self.getSpiderSpearmanData()
+            return self.getSpiderSpearmanData(query_params.get('dataset'))
         elif resulttype == 'AlphaTalk':
             return self.getAlphaTalkLRPairs(
                 page=query_params.get('page', 1),
@@ -1444,6 +1463,23 @@ class SubScstquery(Module):
             print(f"CellChat Args: {self.script_arguments}")
             
             self.shell_script = "/data3/platform/sc_db/cellchat/run_slurm_cellchat.sh"
+        elif subtask_type == "spider":
+            species = params.get('species', 'human')
+            datatype_val = params.get('datatype', 'st')
+            cluster_key = params.get('groupby', 'cell_type')
+            p_value = params.get('p_value', 0.05)
+            is_human = 'True' if species == 'human' else 'False'
+            is_sc = 'True' if datatype_val == 'sc' else 'False'
+
+            self.script_arguments = [
+                st_h5ad_path,
+                outputdir,
+                is_human,
+                is_sc,
+                cluster_key,
+                str(p_value)
+            ]
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_spider.sh'
         else:
             raise ValueError(f"不支持的小种类: {subtask_type}")
 

@@ -350,7 +350,7 @@ def subtask_status_update(request):
     参数: subtaskid
     """
     subtaskid = request.query_params.get('subtaskid')
-    FINAL_STATES = ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL']
+    NON_FINAL_STATES = ["RUNNING", "PENDING", "CONFIGURING", "COMPLETING", "REQUEUED", "SUSPENDED"]
     res = {'status': 'Failed', 'message': 'Invalid request.'}
 
     if not subtaskid:
@@ -367,7 +367,7 @@ def subtask_status_update(request):
         return Response(res, status=404)
 
     # 1. 如果数据库状态已经是终态，直接返回
-    if current_db_status in FINAL_STATES:
+    if current_db_status.upper() not in NON_FINAL_STATES:
         return Response({
             'status': 'Success',
             'current_status': current_db_status,
@@ -392,7 +392,7 @@ def subtask_status_update(request):
         ).order_by('-id').first()
         if hc_subtask:
             # Update HC status from Slurm if needed
-            if hc_subtask.status not in FINAL_STATES and hc_subtask.job_id and hc_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc'):
+            if hc_subtask.status.upper() in NON_FINAL_STATES and hc_subtask.job_id and hc_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc'):
                 try:
                     slurm_status = slurm_api.get_job_status(hc_subtask.job_id)
                     if slurm_status:
