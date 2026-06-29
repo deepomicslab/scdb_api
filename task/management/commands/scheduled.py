@@ -14,10 +14,9 @@ class Command(BaseCommand):
     help = 'Check and update status of running tasks from Slurm'
 
     def handle(self, *args, **options):
-        self.stdout.write('Starting update script...')
         
         # 获取所有标记为 Running 的任务
-        tasklist = tasks.objects.filter(status='Running')
+        tasklist = tasks.objects.filter(status__iexact='Running')
         
         for task in tasklist:
             # 将 try 移到循环内部，防止一个任务报错卡死整个脚本
@@ -31,7 +30,10 @@ class Command(BaseCommand):
                 jsonpath = os.path.join(base_path, 'taskdetail.json')
 
                 if not os.path.exists(objectpath):
-                    self.stdout.write(self.style.WARNING(f'Pickle file not found for task {task.id}'))
+                    # 工作目录已被清理 / pkl 缺失 -> 直接从 DB 删除
+                    task_id = task.id
+                    task.delete()
+                    self.stdout.write(self.style.WARNING(f'Pickle file not found for task {task_id}, deleted from DB'))
                     continue
 
                 # 加载对象
@@ -77,12 +79,23 @@ class Command(BaseCommand):
                 error_msg = f'Error processing task {task.id}: {str(e)}'
                 self.stdout.write(self.style.ERROR(error_msg))
                 # 实际生产中建议这里使用 logger.error(error_msg)
+                # 兜底：避免 pkl 损坏 / SLURM 异常导致任务永远 Running
+                # 只在原本就是 Running 时才改，避免覆盖已终态
+                try:
+                    if (task.status or '').lower() == 'running':
+                        task.status = 'Failed'
+                        task.save()
+                        self.stdout.write(self.style.WARNING(f'Task {task.id} marked Failed due to processing error'))
+                except Exception:
+                    pass
 
         # 记录脚本运行日志
         try:
             current_time = datetime.datetime.now()
-            # 建议把硬编码路径改为配置项
-            log_path = '/home/platform/project/scdb_platform/scdb_api/workspace/log/update.txt'
+            # 写在项目外, 避免 StatReloader 误判文件变更触发无限重启
+            log_dir = "/home/platform/project/scdb_api_logs"
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "update.txt")
             with open(log_path, 'a+') as f:
                 f.write('exec update finish at '+str(current_time)+"\n")
         except Exception as e:
