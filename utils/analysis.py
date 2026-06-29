@@ -265,8 +265,7 @@ class Scstquery(Module):
         if params['processType'] == "cluster":
             self.script_arguments = [inputfilepath,outputdir,projectname,'190','1.2','cluster',organs]
         elif params['processType'] == "celltype":
-            hierarchicalCluster = params['hierarchicalCluster']
-            self.script_arguments = [inputfilepath,outputdir,projectname,'190','1.2','cell_type',str(hierarchicalCluster),organs,disease]
+            self.script_arguments = [inputfilepath,outputdir,projectname,'190','1.2','cell_type',organs,disease]
         #/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old
         self.shell_script = local_settings.SCDB_MODULE+'scst_query/run.sh'
         print(self.shell_script, self.script_arguments)
@@ -502,6 +501,7 @@ class Scstquery(Module):
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
+        query_count_result['Label'] = query_count_result['Label'].astype(str)
         query_count_result = query_count_result.replace({np.nan: None})
         cluster_celltype_distribution_data = {}
         if os.path.exists(cluster_celltype_distribution_filepath):
@@ -519,6 +519,7 @@ class Scstquery(Module):
         query_count_result = pd.read_csv(result_path, index_col=0)
         if 'clusters' in query_count_result.columns:
             query_count_result = query_count_result.drop(columns=['clusters'])
+        query_count_result['Label'] = query_count_result['Label'].astype(str)
         query_count_result = query_count_result.replace({np.nan: None})
         res = {'scatter': query_count_result.to_dict(orient='index'), 'status': 'success'}
         return res
@@ -555,6 +556,7 @@ class Scstquery(Module):
         cluster_HierarchicalClustering_query_count_result = cluster_HierarchicalClustering_query_count_result.replace({np.nan: None})
         if 'clusters' in cluster_HierarchicalClustering_query_count_result.columns:
             cluster_HierarchicalClustering_query_count_result = cluster_HierarchicalClustering_query_count_result.drop(columns=['clusters'])
+        cluster_HierarchicalClustering_query_count_result['Label'] = cluster_HierarchicalClustering_query_count_result['Label'].astype(str)
         res = {'scatter': cluster_HierarchicalClustering_query_count_result.to_dict(orient='index'), 'status': 'success'}
         return res
     
@@ -1423,7 +1425,7 @@ class SubScstquery(Module):
                 organs,
                 dataset_path,
             ]
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/run.sh'
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical_clustering.sh'
         elif subtask_type == 'marker_genes':
             self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
