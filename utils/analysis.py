@@ -492,7 +492,7 @@ class Scstquery(Module):
         return None
 
     def getHEScatterresult(self, result):
-        subtask_he = self._resolve_subtask_he_path(result, 'annotation_mapping')
+        subtask_he = self._resolve_subtask_he_path(result, 'he_scatter')
         base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
         result_path = os.path.join(base, "all_merged_data_with_labels.csv")
         cluster_celltype_distribution_filepath = os.path.join(self.path, "result/he/cluster_celltype_distribution.json")
@@ -1402,6 +1402,10 @@ class SubScstquery(Module):
             self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'hierarchical', organs]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical.sh'
         elif subtask_type == 'annotation_mapping':
+            # annotation_mapping is now a routing-only subtask; actual work delegated to he_scatter
+            self.script_arguments = []
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_annotation_mapping.sh'
+        elif subtask_type == 'he_scatter':
             output_json = os.path.join(user_main_dir, 'result/sc_query/output.json')
             projectname = params.get('projectname', 'default')
             hc_csv = os.path.join(user_main_dir, 'result/sc_marker', f'{projectname}_hierarchical_clusters.csv')
@@ -1410,7 +1414,7 @@ class SubScstquery(Module):
             else:
                 celltype_count_dic = os.path.join(user_main_dir, 'result/sc_marker', f'{projectname}_clusters.csv')
             self.script_arguments = [output_json, dataset_path, outputdir, celltype_count_dic]
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_annotation_mapping.sh'
+            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_he_scatter.sh'
         elif subtask_type == 'recall_analysis':
             pass  # viewer type, data served by hierarchical_clustering subtask
         elif subtask_type == 'hierarchical_clustering':

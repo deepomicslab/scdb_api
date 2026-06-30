@@ -312,6 +312,33 @@ def create_subtask(request):
                     parameters_dict['_hc_job_id'] = hc_job_id
                     print(f'Auto-created HC subtask id={hc_subtask.id}, job_id={hc_job_id}')
 
+        # Auto-chain he_scatter as prerequisite for annotation_mapping
+        needs_he_scatter = subtasktype == 'annotation_mapping'
+        if needs_he_scatter:
+            he_scatter_result = os.path.join(local_settings.USERTASKPATH, usertask_dir, f'dataset_{dataset_uuid}', 'subtask_he_scatter', 'result', 'he', 'all_merged_data_with_labels.csv')
+            if not os.path.isfile(he_scatter_result):
+                hs_params = parameters_dict.copy()
+                hs_params['sub_type'] = 'he_scatter'
+                if 'organParts' not in hs_params:
+                    hs_params['organParts'] = ''
+                if 'projectname' not in hs_params:
+                    hs_params['projectname'] = 'test'
+                hs_module = cls('he_scatter', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hs_params)
+                hs_job_id = hs_module.process()
+                if hs_job_id and hs_job_id != 'skipped_existing':
+                    new_submodule.add_dependency(hs_module)
+                    hs_subtask = SubTask.objects.create(
+                        main_task=main_task,
+                        subtask_type='he_scatter',
+                        dataset_path=dataset_path,
+                        status='Running',
+                        job_id=hs_job_id,
+                        parameters=hs_params
+                    )
+                    parameters_dict['_hs_subtask_id'] = hs_subtask.id
+                    parameters_dict['_hs_job_id'] = hs_job_id
+                    print(f'Auto-created HE scatter subtask id={hs_subtask.id}, job_id={hs_job_id}')
+
         job_id = new_submodule.process()
         print(job_id)
 
