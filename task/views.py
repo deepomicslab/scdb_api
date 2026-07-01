@@ -19,8 +19,6 @@ import utils.analysis
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 import pickle
-import logging
-logger = logging.getLogger(__name__)
 
 class taskViewSet(viewsets.ModelViewSet):
     queryset = tasks.objects.order_by('id')

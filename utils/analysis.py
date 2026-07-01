@@ -16,8 +16,6 @@ import time
 from task.spider_service import get_spider_metadata, get_pattern_data, get_lr_data
 import sys
 import pickle
-import logging
-logger = logging.getLogger(__name__)
 from task.apps import r_proxy
 from dataset.models import Dataset
 # if (
