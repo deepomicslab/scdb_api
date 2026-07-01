@@ -1406,7 +1406,7 @@ class SubScstquery(Module):
         elif subtask_type == 'annotation_mapping':
             # annotation_mapping is now a routing-only subtask; actual work delegated to he_scatter
             self.script_arguments = []
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_annotation_mapping.sh'
+            self.shell_script = None  # no SLURM job; he_scatter handles the actual work
         elif subtask_type == 'he_scatter':
             output_json = os.path.join(user_main_dir, 'result/sc_query/output.json')
             projectname = params.get('projectname', 'default')
@@ -1506,6 +1506,15 @@ class SubScstquery(Module):
                 self.status = 'Completed'
                 self.job_id = 'skipped_existing'
                 return self.job_id
+        if self.subtask_type == 'annotation_mapping':
+            # routing-only; actual work delegated to he_scatter
+            if self.dependencies:
+                self.status = 'Pending'
+                self.job_id = 'pending_he_scatter'
+                return self.job_id
+            self.status = 'Completed'
+            self.job_id = 'viewer_only'
+            return self.job_id
         return super().process()
 
     def getresult(self, query_params):

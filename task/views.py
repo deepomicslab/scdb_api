@@ -411,7 +411,7 @@ def subtask_status_update(request):
         })
 
     # 2b. Pending viewer waiting for HC subtask to complete
-    if job_id == 'pending_hc' and subtask.subtask_type in ('recall_analysis', 'annotation_mapping'):
+    if job_id == 'pending_hc' and subtask.subtask_type == 'recall_analysis':
         hc_subtask = SubTask.objects.filter(
             main_task=subtask.main_task,
             subtask_type='hierarchical_clustering',
@@ -446,6 +446,43 @@ def subtask_status_update(request):
             'job_id': job_id,
             'hc_job_id': hc_job,
             'message': f'Waiting for HC subtask (job {hc_job}) to complete.'
+        })
+
+    # 2c. Pending viewer waiting for he_scatter subtask to complete
+    if job_id == 'pending_he_scatter' and subtask.subtask_type == 'annotation_mapping':
+        hs_subtask = SubTask.objects.filter(
+            main_task=subtask.main_task,
+            subtask_type='he_scatter',
+            dataset_path=subtask.dataset_path
+        ).order_by('-id').first()
+        if hs_subtask:
+            if hs_subtask.status.upper() in NON_FINAL_STATES and hs_subtask.job_id and hs_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_he_scatter'):
+                try:
+                    slurm_status = slurm_api.get_job_status(hs_subtask.job_id)
+                    if slurm_status:
+                        slurm_status = slurm_status.rstrip('+').upper()
+                        if slurm_status != hs_subtask.status:
+                            hs_subtask.status = slurm_status
+                            hs_subtask.save()
+                except Exception:
+                    pass
+        if hs_subtask and hs_subtask.status in ('Completed', 'COMPLETED'):
+            subtask.status = 'Completed'
+            subtask.job_id = 'viewer_only'
+            subtask.save()
+            return Response({
+                'status': 'Success',
+                'current_status': 'Completed',
+                'job_id': 'viewer_only',
+                'message': 'HE scatter completed, annotation viewer ready.'
+            })
+        hs_job = subtask.parameters.get('_hs_job_id', 'unknown')
+        return Response({
+            'status': 'Success',
+            'current_status': 'Pending',
+            'job_id': job_id,
+            'hs_job_id': hs_job,
+            'message': f'Waiting for HE scatter subtask (job {hs_job}) to complete.'
         })
 
     # 3. 如果 job_id 为空，但状态不是终态，可能是提交失败
