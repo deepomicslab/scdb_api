@@ -772,27 +772,29 @@ class Scstquery(Module):
     
     def getImgpath(self, analysis_type, image_ID):
         if analysis_type == "he":
-            dataset = image_ID
-            result_dict_path = os.path.join(self.path, f'result/he/path_map.json')
-            with open(result_dict_path, 'r') as json_file:
-                result_dict = json.load(json_file)
-            keys_array = list(result_dict.keys())
-            if dataset:
-                if dataset in result_dict:
-                    he_img_path = os.path.join(self.path, result_dict[dataset]["pic_path"])
-                    return he_img_path
-                else:
+            dataset_id = image_ID
+            try:
+                from dataset.models import Dataset
+                import h5py
+                ds = Dataset.objects.get(dataset_id=dataset_id)
+                png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
+                if not os.path.exists(png_path):
+                    with h5py.File(ds.file_path, "r") as f:
+                        if "uns/spatial" not in f:
+                            return ""
+                        for lib in f["uns/spatial"].keys():
+                            for img_key in ("hires", "lowres"):
+                                img_full = f"uns/spatial/{lib}/images/{img_key}"
+                                if img_full in f:
+                                    from PIL import Image
+                                    Image.fromarray(f[img_full][:]).save(png_path)
+                                    return png_path
                     return ""
-            else:
-                if keys_array:
-                    first_key = keys_array[0]
-                    he_img_path = os.path.join(self.path, result_dict[first_key]["pic_path"])
-                    return he_img_path
-                else:
-                    return ""
-        else:
-            return ""
-    
+                return png_path
+            except Exception as e:
+                print(f"[tissue_image] error for {dataset_id}: {e}")
+                return ""
+        return ""
     def run_cellchat_api(self, rds_path, method, signaling=None, lrpair=None, output_file=None):
         import time, os, subprocess, json
 
