@@ -183,7 +183,7 @@ def taskresultview(request):
     return Response(res)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 def getImg(request):
     taskid = request.query_params.get('task_id')
     image_analysis_type = request.query_params.get('image_analysis_type')
@@ -205,9 +205,9 @@ def getImg(request):
             else:
                 return Response({'error': 'Image not found'}, status=404)
         else:
-            return Response({'message': "No image for this dataset."})
+            return Response({'message': "No image for this dataset."}, status=404)
     else:
-        return Response({'message': f"No such analysis_type {image_analysis_type}"})
+        return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
     
 @api_view(['POST'])
 def create_subtask(request):
