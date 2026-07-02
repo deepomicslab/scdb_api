@@ -185,10 +185,6 @@ def taskresultview(request):
 
 @api_view(['GET', 'HEAD'])
 def getImg(request):
-    # taskid is accepted for backward compatibility but no longer used.
-    # The endpoint now looks up the dataset directly via image_id
-    # (UUID) and falls back to title lookup if UUID not found.
-    taskid = request.query_params.get('task_id')  # ignored
     image_analysis_type = request.query_params.get('image_analysis_type')
     image_id = request.query_params.get('image_id')
 
