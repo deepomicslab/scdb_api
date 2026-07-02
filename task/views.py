@@ -210,15 +210,23 @@ def getImg(request):
         if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
 
-        # Pick cache path and max size based on resolution hint
+        # Pick cache path, max size, and content type based on resolution
         if resolution == 'thumbnail':
-            png_path = ds.file_path.replace(".h5ad", "_tissue_thumbnail.png")
-            max_size = 500
+            # 缩略图用 JPEG（HE 连续色阶更适合 JPEG 压缩），400x400 max（卡片 250x170 显示够用）
+            cache_path = ds.file_path.replace(".h5ad", "_tissue_thumbnail.jpg")
+            max_size = 400
+            content_type = 'image/jpeg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 75, 'optimize': True}
         else:
-            png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
+            # 默认：PNG 完整分辨率（用于分析，不应压缩）
+            cache_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
             max_size = None
+            content_type = 'image/png'
+            save_format = None
+            save_kwargs = {}
 
-        if not os.path.exists(png_path):
+        if not os.path.exists(cache_path):
             # Try to extract from h5ad
             try:
                 with h5py.File(ds.file_path, "r") as f:
@@ -231,13 +239,16 @@ def getImg(request):
                                 img = Image.fromarray(f[img_full][:])
                                 if max_size:
                                     img.thumbnail((max_size, max_size), Image.LANCZOS)
-                                img.save(png_path)
-                                return FileResponse(open(png_path, 'rb'), content_type='image/png')
+                                if save_format:
+                                    img.save(cache_path, save_format, **save_kwargs)
+                                else:
+                                    img.save(cache_path)
+                                return FileResponse(open(cache_path, 'rb'), content_type=content_type)
             except Exception as e:
                 print(f"[getImg] error extracting image for {image_id}: {e}")
             return Response({'message': "No image for this dataset."}, status=404)
 
-        return FileResponse(open(png_path, 'rb'), content_type='image/png')
+        return FileResponse(open(cache_path, 'rb'), content_type=content_type)
     else:
         return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
     
