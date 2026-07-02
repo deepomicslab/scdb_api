@@ -185,27 +185,50 @@ def taskresultview(request):
 
 @api_view(['GET', 'HEAD'])
 def getImg(request):
-    taskid = request.query_params.get('task_id')
+    # taskid is accepted for backward compatibility but no longer used.
+    # The endpoint now looks up the dataset directly via image_id
+    # (UUID) and falls back to title lookup if UUID not found.
+    taskid = request.query_params.get('task_id')  # ignored
     image_analysis_type = request.query_params.get('image_analysis_type')
     image_id = request.query_params.get('image_id')
-    
-    taskobject = tasks.objects.get(id=taskid)
-    objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
-    with open(objectpath, 'rb') as f:
-        #载入模块对象
-        module = pickle.load(f)
-    img_path = ''
-    
+
     if image_analysis_type == "he":
-        query_params = {'resulttype': "img_path", 'analysis_type': "he",  'img_id': image_id}
-        img_path=module.getresult(query_params)
-        if img_path:
-            if os.path.exists(img_path):
-                return FileResponse(open(img_path, 'rb'), content_type='image/png')
-            else:
-                return Response({'error': 'Image not found'}, status=404)
-        else:
+        from dataset.models import Dataset
+        import h5py
+        from PIL import Image
+
+        # Try dataset_id (UUID) first, then fall back to title
+        ds = None
+        try:
+            ds = Dataset.objects.get(dataset_id=image_id)
+        except (Dataset.DoesNotExist, Dataset.MultipleObjectsReturned):
+            try:
+                ds = Dataset.objects.get(title=image_id)
+            except Dataset.DoesNotExist:
+                pass
+
+        if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
+
+        png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
+
+        if not os.path.exists(png_path):
+            # Try to extract from h5ad
+            try:
+                with h5py.File(ds.file_path, "r") as f:
+                    if "uns/spatial" not in f:
+                        return Response({'message': "No image for this dataset."}, status=404)
+                    for lib in f["uns/spatial"].keys():
+                        for img_key in ("hires", "lowres"):
+                            img_full = f"uns/spatial/{lib}/images/{img_key}"
+                            if img_full in f:
+                                Image.fromarray(f[img_full][:]).save(png_path)
+                                return FileResponse(open(png_path, 'rb'), content_type='image/png')
+            except Exception as e:
+                print(f"[getImg] error extracting image for {image_id}: {e}")
+            return Response({'message': "No image for this dataset."}, status=404)
+
+        return FileResponse(open(png_path, 'rb'), content_type='image/png')
     else:
         return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
     
