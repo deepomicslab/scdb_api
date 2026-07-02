@@ -187,6 +187,10 @@ def taskresultview(request):
 def getImg(request):
     image_analysis_type = request.query_params.get('image_analysis_type')
     image_id = request.query_params.get('image_id')
+    # Optional resolution hint: 'thumbnail' returns a 500x500 max downscaled
+    # PNG (cached separately as _tissue_thumbnail.png). Default returns the
+    # full hires image (backwards compatible).
+    resolution = request.query_params.get('resolution')
 
     if image_analysis_type == "he":
         from dataset.models import Dataset
@@ -206,7 +210,13 @@ def getImg(request):
         if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
 
-        png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
+        # Pick cache path and max size based on resolution hint
+        if resolution == 'thumbnail':
+            png_path = ds.file_path.replace(".h5ad", "_tissue_thumbnail.png")
+            max_size = 500
+        else:
+            png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
+            max_size = None
 
         if not os.path.exists(png_path):
             # Try to extract from h5ad
@@ -218,7 +228,10 @@ def getImg(request):
                         for img_key in ("hires", "lowres"):
                             img_full = f"uns/spatial/{lib}/images/{img_key}"
                             if img_full in f:
-                                Image.fromarray(f[img_full][:]).save(png_path)
+                                img = Image.fromarray(f[img_full][:])
+                                if max_size:
+                                    img.thumbnail((max_size, max_size), Image.LANCZOS)
+                                img.save(png_path)
                                 return FileResponse(open(png_path, 'rb'), content_type='image/png')
             except Exception as e:
                 print(f"[getImg] error extracting image for {image_id}: {e}")
