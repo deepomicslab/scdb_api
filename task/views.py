@@ -210,21 +210,29 @@ def getImg(request):
         if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
 
-        # Pick cache path, max size, and content type based on resolution
+        # 3 档 resolution：
+        #   thumbnail : 400x400 JPEG q75  (~13KB)  — 卡片缩略图
+        #   medium    : 800x800 JPEG q80  (~50-100KB) — 散点图底图（默认）
+        #   original  : 完整分辨率 JPEG q85 (~1MB)   — 高清 opt-in
         if resolution == 'thumbnail':
-            # 缩略图用 JPEG（HE 连续色阶更适合 JPEG 压缩），400x400 max（卡片 250x170 显示够用）
             cache_path = ds.file_path.replace(".h5ad", "_tissue_thumbnail.jpg")
             max_size = 400
             content_type = 'image/jpeg'
             save_format = 'JPEG'
             save_kwargs = {'quality': 75, 'optimize': True}
+        elif resolution == 'original':
+            cache_path = ds.file_path.replace(".h5ad", "_tissue_hires.jpg")
+            max_size = None  # 完整分辨率
+            content_type = 'image/jpeg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 85, 'optimize': True}
         else:
-            # 默认：PNG 完整分辨率（用于分析，不应压缩）
-            cache_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
-            max_size = None
-            content_type = 'image/png'
-            save_format = None
-            save_kwargs = {}
+            # 默认（无 param 或 ?resolution=medium）：medium
+            cache_path = ds.file_path.replace(".h5ad", "_tissue_medium.jpg")
+            max_size = 800
+            content_type = 'image/jpeg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 80, 'optimize': True}
 
         if not os.path.exists(cache_path):
             # Try to extract from h5ad
