@@ -180,6 +180,14 @@ def taskresultview(request):
         #载入模块对象
         module = pickle.load(f)
     res=module.getresult(query_params)
+    # scstmappingDownload returns a {'_stream_file': path, 'filename': ...} marker ->
+    # stream the h5ad as a FileResponse instead of base64-encoding it into a JSON body
+    # (avoids loading multi-MB files into memory + client-side atob churn).
+    if isinstance(res, dict) and res.get('_stream_file'):
+        return FileResponse(open(res['_stream_file'], 'rb'),
+                            as_attachment=True,
+                            filename=res.get('filename', 'mapping.h5ad'),
+                            content_type='application/octet-stream')
     return Response(res)
 
 
@@ -273,7 +281,8 @@ def create_subtask(request):
     res = {}
     taskid = request.data.get('taskid')
     userid = request.data.get('userid')
-    dataset_path = request.data.get('dataset_path')  # 新增：数据集 ID
+    dataset_path = request.data.get('dataset_path')  # marker_path (legacy, 仍用于 getDatasetInfo 读文件)
+    dataset_id = request.data.get('dataset_id', '')   # Kidney_Cancer_001 — 身份令牌,存入 SubTask.dataset_path
     subtasktype = request.data.get('subtasktype')
     print(taskid, userid, dataset_path, subtasktype)
     if not taskid or not userid or not dataset_path or not subtasktype:
@@ -306,7 +315,7 @@ def create_subtask(request):
     new_subtask = SubTask.objects.create(
         main_task=main_task,
         subtask_type=subtasktype,
-        dataset_path=dataset_path,
+        dataset_path=dataset_id,
         status='Created',
         parameters=parameters_dict
     )
@@ -321,15 +330,13 @@ def create_subtask(request):
             raise ValueError('SubScstquery 模块未找到')
 
         # 模块自理目录/文件：传子任务名 + params (含路径)
-        # Resolve dataset UUID from Dataset model
-        dataset_id = request.data.get('dataset_id', '')
+        # Resolve dataset dir key (= Dataset.title) from Dataset model
         dataset_uuid = ''
         st_h5ad_path = ''
         if dataset_id:
             try:
                 ds = Dataset.objects.get(dataset_id=dataset_id)
-                # Extract UUID from file_path: /data3/.../uuid/st_filtered_adata/...
-                dataset_uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+                dataset_uuid = ds.title  # 目录键统一用 title(与读侧 _dataset_dir_key 一致)
                 st_h5ad_path = ds.file_path
             except Dataset.DoesNotExist:
                 pass
@@ -354,7 +361,7 @@ def create_subtask(request):
                     hc_subtask = SubTask.objects.create(
                         main_task=main_task,
                         subtask_type='hierarchical_clustering',
-                        dataset_path=dataset_path,
+                        dataset_path=dataset_id,
                         status='Running',
                         job_id=hc_job_id,
                         parameters=hc_params
@@ -381,7 +388,7 @@ def create_subtask(request):
                     hs_subtask = SubTask.objects.create(
                         main_task=main_task,
                         subtask_type='he_scatter',
-                        dataset_path=dataset_path,
+                        dataset_path=dataset_id,
                         status='Running',
                         job_id=hs_job_id,
                         parameters=hs_params
@@ -389,6 +396,22 @@ def create_subtask(request):
                     parameters_dict['_hs_subtask_id'] = hs_subtask.id
                     parameters_dict['_hs_job_id'] = hs_job_id
                     print(f'Auto-created HE scatter subtask id={hs_subtask.id}, job_id={hs_job_id}')
+
+        # Explicit flow: commot/cellchat/spider require an already-completed SC-ST Mapping
+        # output for the chosen method (user runs SC-ST Mapping first). Reject if missing
+        # instead of auto-chaining a mapping job.
+        if subtasktype in ('commot', 'cellchat', 'spider'):
+            mapping_method = parameters_dict.get('mapping_method', 'cytospace')
+            map_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir,
+                                          f'dataset_{dataset_uuid}', 'subtask_scst_mapping', 'result')
+            if mapping_method == 'cytospace':
+                map_output = os.path.join(map_result_dir, 'cytospace', 'input_spatial.h5ad')
+            else:
+                map_output = os.path.join(map_result_dir, mapping_method, 'tangram_ge.h5ad')
+            if not os.path.isfile(map_output):
+                res['status'] = 'Failed'
+                res['message'] = f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."
+                return Response(res, status=400)
 
         job_id = new_submodule.process()
         print(job_id)

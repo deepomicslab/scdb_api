@@ -48,6 +48,89 @@ class Module:
             raise TypeError("Dependency must be an instance of Module or its subclasses.")
         self.dependencies.append(module)
 
+    def _dataset_dir_key(self, dataset_id):
+        """dataset_<key> result-dir key, sourced from the Dataset table by dataset_id
+        (returns Dataset.title). Write/read/listing all use this so the dir matches
+        across create, status-poll and download -- no more basename-vs-path-parsing drift."""
+        try:
+            return Dataset.objects.get(dataset_id=dataset_id).title
+        except Dataset.DoesNotExist:
+            return None
+
+    def _scstmappingStatusFallback(self, dataset_id):
+        from task.models import SubTask as SubTaskModel, tasks as task_model
+        try:
+            uuid = self._dataset_dir_key(dataset_id)
+            if not uuid:
+                return {'completed_methods': [], 'running_methods': [], 'status': 'error', 'message': 'Cannot resolve dataset UUID'}
+            methods = []
+            map_dir = os.path.join(self.path, 'dataset_' + uuid, 'subtask_scst_mapping', 'result')
+            if os.path.exists(os.path.join(map_dir, 'cytospace', 'input_spatial.h5ad')):
+                methods.append('cytospace')
+            if os.path.exists(os.path.join(map_dir, 'tangram', 'tangram_ge.h5ad')):
+                methods.append('tangram')
+            # Filter by main_task to prevent cross-task status leaking
+            userpath = self.path.replace(local_settings.USERTASKPATH, '')
+            main_task = task_model.objects.get(userpath=userpath)
+            from django.db.models import Q
+            # Collect ALL concurrently-running mapping methods (not just one) so the
+            # frontend can show each method's running state independently when the user
+            # launches cytospace + tangram together. values_list on a JSON field is not
+            # portable across DB backends, so extract mapping_method in Python.
+            running_qs = SubTaskModel.objects.filter(
+                main_task=main_task,
+                subtask_type='scst_mapping',
+                dataset_path=dataset_id,
+            ).filter(
+                Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
+            )
+            running_methods = []
+            seen = set()
+            for st in running_qs:
+                params = st.parameters if isinstance(st.parameters, dict) else {}
+                m = params.get('mapping_method')
+                if m and m not in seen:
+                    seen.add(m)
+                    running_methods.append(m)
+            return {'completed_methods': methods, 'running_methods': running_methods, 'status': 'success'}
+        except Exception as e:
+            return {'completed_methods': [], 'running_methods': [], 'status': 'error', 'message': str(e)}
+
+    def _extract_dataset_uuid(self, dataset_path):
+        """Extract UUID from dataset_path (format: .../st_marker/<uuid>/...).
+        Returns None if parsing fails."""
+        parts = dataset_path.split('/')
+        for i, p in enumerate(parts):
+            if p == 'st_marker' and i > 1:
+                return parts[i - 1]
+        return None
+
+    def _scstmapping_resolve_file(self, dataset_id, method):
+        """Resolve mapping result h5ad path for streaming download.
+        Returns {'_stream_file': abs_path, 'filename': fname} on success -- the view
+        turns this into a FileResponse -- or {'status': 'fail', 'message': ...} on error.
+        Never raises. (Replaces the old base64-into-JSON body so multi-MB h5ad files are
+        streamed instead of loaded into memory + atob'd on the client.)"""
+        try:
+            uuid = self._dataset_dir_key(dataset_id)
+            if not uuid:
+                return {'status': 'fail', 'message': 'Cannot resolve dataset UUID'}
+            # Deterministic output filename (mirrors _resolve_mapping_output) instead of
+            # globbing *.h5ad[0], which can pick the wrong file.
+            if method == 'cytospace':
+                fname = 'input_spatial.h5ad'
+            elif method == 'tangram':
+                fname = 'tangram_ge.h5ad'
+            else:
+                return {'status': 'fail', 'message': f'Unknown mapping method: {method}'}
+            h5ad_path = os.path.join(self.path, 'dataset_' + uuid,
+                                     'subtask_scst_mapping', 'result', method, fname)
+            if not os.path.isfile(h5ad_path):
+                return {'status': 'fail', 'message': f'No mapping file found: {fname}'}
+            return {'_stream_file': h5ad_path, 'filename': fname}
+        except Exception as e:
+            return {'status': 'fail', 'message': str(e)}
+
     def check_status(self):
         # statuslist = ['PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING', 'COMPLETED','CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL']
         if self.job_id is None:
@@ -227,6 +310,8 @@ class Scquery(Module):
             return self.getdownloadfilelist(query_params.get('flag'))
         elif resulttype == 'download':
             return self.download(query_params.get('filename'))
+        elif resulttype == 'scstmappingStatus':
+            return self._scstmappingStatusFallback(query_params.get('dataset'))
         else:
             expressionfile=self.path+ '/result/scquery/sc_output_expression.csv'
             expression = pd.read_csv(expressionfile, index_col=0)
@@ -312,11 +397,10 @@ class Scstquery(Module):
             transformed_data[organ_name] = {}
             
             for original_path, scores in datasets_dict.items():
-                # === A. 提取 UUID (对应 extractDatasetTitleFromPath 逻辑) ===
+                # === A. 提取 UUID (marker_path 里 st_marker 前一段 = Dataset.title) ===
                 # 路径示例: .../thymus/7426a474.../st_marker/test_marker.csv
-                # split('/') 后倒数第三个就是 UUID
-                parts = original_path.split('/')
-                extracted_uuid = parts[-3] if len(parts) >= 3 else ""
+                # 用 _extract_dataset_uuid 取 st_marker 前一段,比 parts[-3] 更稳(兼容非扁平 marker 路径)
+                extracted_uuid = self._extract_dataset_uuid(original_path) or ""
 
                 # === B. 数据库查询 ===
                 db_obj = None
@@ -359,7 +443,11 @@ class Scstquery(Module):
                 new_value['meta'] = meta_info             # 详细元数据
 
                 # Attach subtask info
-                new_value['subtasks'] = subtask_map.get(original_path, {})
+                # subtask_map is keyed by SubTask.dataset_path: dataset_id for new rows,
+                # marker_path for legacy rows. Try dataset_id first, then marker_path.
+                _subtasks = subtask_map.get(db_obj.dataset_id if db_obj else None, {}) \
+                    or subtask_map.get(original_path, {})
+                new_value['subtasks'] = _subtasks
 
                 # 放入新的字典中
                 transformed_data[organ_name][new_key] = new_value
@@ -483,7 +571,7 @@ class Scstquery(Module):
             return None
         try:
             ds = Dataset.objects.get(dataset_id=dataset_id)
-            uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+            uuid = ds.title
             he_dir = os.path.join(self.path, f'dataset_{uuid}', f'subtask_{subtask_type}', 'result', 'he')
             if os.path.isdir(he_dir):
                 return he_dir
@@ -639,7 +727,7 @@ class Scstquery(Module):
         try:
             from dataset.models import Dataset
             ds = Dataset.objects.get(dataset_id=dataset_name)
-            uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+            uuid = ds.title
             result_dir = os.path.join(self.path, f'dataset_{uuid}', 'subtask_commot', 'result')
             print(f"[commot] file_path: {ds.file_path}")
             print(f"[commot] uuid: {uuid}")
@@ -839,26 +927,19 @@ class Scstquery(Module):
 
     
     def _find_cellchat_rds(self, dataset):
-        """根据 dataset (UUID) 定位 subtask_cellchat 的 RDS 文件"""
+        """根据 dataset_id 定位 subtask_cellchat 的 RDS 文件"""
         if getattr(self, '_is_demo', False):
             rds_files = glob.glob(os.path.join(self.path, 'result', 'cellchat', '*.rds'))
             return rds_files[0] if rds_files else None
         if not dataset:
             raise ValueError('dataset is required')
-        rds_path = os.path.join(self.path, f'dataset_{dataset}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
-        if os.path.exists(rds_path):
-            return rds_path
-        # dataset 可能是 DB 的 dataset_id, 但磁盘目录用的是 title(UUID)
-        # 尝试查 DB 转换
+        # 目录键统一为 Dataset.title(与写侧/其他读 helper 一致),不再双读
         try:
-            db_obj = Dataset.objects.filter(dataset_id=dataset).first()
-            if db_obj:
-                rds_path = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
-                if os.path.exists(rds_path):
-                    return rds_path
-        except Exception:
-            pass
-        return None
+            db_obj = Dataset.objects.get(dataset_id=dataset)
+        except Dataset.DoesNotExist:
+            return None
+        rds_path = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
+        return rds_path if os.path.exists(rds_path) else None
 
     def getCellChatPathways(self, dataset=None):
         rds_path = self._find_cellchat_rds(dataset)
@@ -924,7 +1005,7 @@ class Scstquery(Module):
         if dataset_id:
             try:
                 ds = Dataset.objects.get(dataset_id=dataset_id)
-                uuid = os.path.splitext(os.path.basename(ds.file_path))[0]
+                uuid = ds.title
                 return os.path.join(self.path, f'dataset_{uuid}', 'subtask_spider', 'result', 'adata_spider.h5ad')
             except Dataset.DoesNotExist:
                 pass
@@ -1238,6 +1319,8 @@ class Scstquery(Module):
             return self.getDatasetInfo(query_params.get('datasetPath'))
         elif resulttype == 'filelist':
             return self.getdownloadfilelist(query_params.get('flag'))
+        elif resulttype == 'scstmappingDownload':
+            return self._scstmapping_resolve_file(query_params.get('dataset'), query_params.get('method'))
         elif resulttype == 'download':
             return self.download(query_params.get('filename'))
         elif resulttype == 'hescatter':
@@ -1280,6 +1363,8 @@ class Scstquery(Module):
             return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'))
         elif resulttype == 'spider_spearman':
             return self.getSpiderSpearmanData(query_params.get('dataset'))
+        elif resulttype == 'scstmappingStatus':
+            return self._scstmappingStatusFallback(query_params.get('dataset'))
         else:
             expressionfile=self.path+ '/result/scquery/sc_output_expression.csv'
             expression = pd.read_csv(expressionfile, index_col=0)
@@ -1296,6 +1381,8 @@ class Scstquery(Module):
             return self.getOrgansAndDatasets()
         elif resulttype == 'filelist':
             return self.getdownloadfilelist(query_params.get('flag'))
+        elif resulttype == 'scstmappingDownload':
+            return self._scstmapping_resolve_file(query_params.get('dataset'), query_params.get('method'))
         elif resulttype == 'download':
             return self.download(query_params.get('filename'))
         elif resulttype == 'hescatter':
@@ -1340,6 +1427,8 @@ class Scstquery(Module):
         elif resulttype == 'spider_spearman':
             # --- 新增：Spearman 分析数据接口 ---
             return self.getSpiderSpearmanData(query_params.get('dataset'))
+        elif resulttype == 'scstmappingStatus':
+            return self._scstmappingStatusFallback(query_params.get('dataset'))
         elif resulttype == 'AlphaTalk':
             return self.getAlphaTalkLRPairs(
                 page=query_params.get('page', 1),
@@ -1373,9 +1462,11 @@ class SubScstquery(Module):
         # 自理目录：/user_dir/dataset_path/subtask_name
         self.params = params
         self.subtask_type = subtask_type
+        self.dataset_uuid = dataset_uuid
         userid = params['userid']  # 假设传 userid（或从 main_userpath 解析）
         super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
+        self.user_main_dir = user_main_dir
         print("user_main_dir", user_main_dir)
 
         if dataset_uuid:
@@ -1436,9 +1527,10 @@ class SubScstquery(Module):
             self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
         elif subtask_type == "commot":
-            # st_h5ad_path comes from Dataset model via views.py
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
-                st_h5ad_path,
+                mapping_h5ad,
                 outputdir
             ]
             self.shell_script = "/data3/platform/sc_db/commot/run_commot.sh"
@@ -1457,8 +1549,10 @@ class SubScstquery(Module):
 
             output_filepath = os.path.join(outputdir, "cellchat_result.rds")
             
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
-                st_h5ad_path,        # $1: input h5ad (per-dataset)
+                mapping_h5ad,          # $1: input h5ad (mapping output)
                 output_filepath,      # $2: Output (建议把输出放前面，逻辑更顺)
                 groupby,              # $3: Groupby
                 db_mode,              # $4: DB Mode
@@ -1479,8 +1573,10 @@ class SubScstquery(Module):
             is_human = 'True' if species == 'human' else 'False'
             is_sc = 'True' if datatype_val == 'sc' else 'False'
 
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
-                st_h5ad_path,
+                mapping_h5ad,
                 outputdir,
                 is_human,
                 is_sc,
@@ -1488,8 +1584,31 @@ class SubScstquery(Module):
                 str(p_value)
             ]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_spider.sh'
+        elif self.subtask_type == 'scst_mapping':
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            if mapping_method == 'cytospace':
+                self.shell_script = local_settings.CYTOSPACE_SCRIPT
+            elif mapping_method == 'tangram':
+                self.shell_script = local_settings.TANGRAM_SCRIPT
+            else:
+                raise ValueError(f"Unknown mapping_method: {mapping_method}")
+            method_outputdir = os.path.join(outputdir, mapping_method)
+            os.makedirs(method_outputdir, exist_ok=True)
+            self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
         else:
             raise ValueError(f"不支持的小种类: {subtask_type}")
+
+    def _resolve_mapping_output(self, dataset_uuid, mapping_method='cytospace'):
+        map_dir = os.path.join(self.user_main_dir,
+                               'dataset_' + str(dataset_uuid), 'subtask_scst_mapping', 'result')
+        method_dir = os.path.join(map_dir, mapping_method)
+        if mapping_method == 'cytospace':
+            return os.path.join(method_dir, 'input_spatial.h5ad')
+        elif mapping_method == 'tangram':
+            return os.path.join(method_dir, 'tangram_ge.h5ad')
+        else:
+            raise ValueError('Unknown mapping_method: ' + str(mapping_method))
+
 
     def process(self):
         if self.subtask_type == 'recall_analysis':
