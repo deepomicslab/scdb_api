@@ -405,9 +405,9 @@ def create_subtask(request):
             map_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir,
                                           f'dataset_{dataset_uuid}', 'subtask_scst_mapping', 'result')
             if mapping_method == 'cytospace':
-                map_output = os.path.join(map_result_dir, 'cytospace', 'input_spatial.h5ad')
+                map_output = os.path.join(map_result_dir, 'cytospace', 'input_sc_spatial.h5ad')
             else:
-                map_output = os.path.join(map_result_dir, mapping_method, 'tangram_ge.h5ad')
+                map_output = os.path.join(map_result_dir, mapping_method, 'input_sc_spatial.h5ad')
             if not os.path.isfile(map_output):
                 res['status'] = 'Failed'
                 res['message'] = f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."

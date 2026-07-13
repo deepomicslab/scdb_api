@@ -65,9 +65,9 @@ class Module:
                 return {'completed_methods': [], 'running_methods': [], 'status': 'error', 'message': 'Cannot resolve dataset UUID'}
             methods = []
             map_dir = os.path.join(self.path, 'dataset_' + uuid, 'subtask_scst_mapping', 'result')
-            if os.path.exists(os.path.join(map_dir, 'cytospace', 'input_spatial.h5ad')):
+            if os.path.exists(os.path.join(map_dir, 'cytospace', 'input_sc_spatial.h5ad')):
                 methods.append('cytospace')
-            if os.path.exists(os.path.join(map_dir, 'tangram', 'tangram_ge.h5ad')):
+            if os.path.exists(os.path.join(map_dir, 'tangram', 'input_sc_spatial.h5ad')):
                 methods.append('tangram')
             # Filter by main_task to prevent cross-task status leaking
             userpath = self.path.replace(local_settings.USERTASKPATH, '')
@@ -118,9 +118,9 @@ class Module:
             # Deterministic output filename (mirrors _resolve_mapping_output) instead of
             # globbing *.h5ad[0], which can pick the wrong file.
             if method == 'cytospace':
-                fname = 'input_spatial.h5ad'
+                fname = 'input_sc_spatial.h5ad'
             elif method == 'tangram':
-                fname = 'tangram_ge.h5ad'
+                fname = 'input_sc_spatial.h5ad'
             else:
                 return {'status': 'fail', 'message': f'Unknown mapping method: {method}'}
             h5ad_path = os.path.join(self.path, 'dataset_' + uuid,
@@ -1603,9 +1603,9 @@ class SubScstquery(Module):
                                'dataset_' + str(dataset_uuid), 'subtask_scst_mapping', 'result')
         method_dir = os.path.join(map_dir, mapping_method)
         if mapping_method == 'cytospace':
-            return os.path.join(method_dir, 'input_spatial.h5ad')
+            return os.path.join(method_dir, 'input_sc_spatial.h5ad')
         elif mapping_method == 'tangram':
-            return os.path.join(method_dir, 'tangram_ge.h5ad')
+            return os.path.join(method_dir, 'input_sc_spatial.h5ad')
         else:
             raise ValueError('Unknown mapping_method: ' + str(mapping_method))
 
