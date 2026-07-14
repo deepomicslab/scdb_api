@@ -467,6 +467,28 @@ def subtask_status_update(request):
         res['message'] = f'ID 为 {subtaskid} 的子任务不存在。'
         return Response(res, status=404)
 
+    # 0. Sync auto-chained HC dependency: commot/cellchat/spider chain HC with a
+    # real SLURM job (dependency_job_ids), so the HC subtask is never frontend-polled
+    # and its DB status would stay 'Running' after the SLURM job finishes. When the
+    # parent is polled, sync the HC too. (recall_analysis covers its own HC via the
+    # pending_hc branch below; this covers the real-job case.) Runs even if the parent
+    # is already final, so a stale HC gets fixed on the next parent poll.
+    if subtask.subtask_type in ('commot', 'cellchat', 'spider'):
+        hc_subtask_id = (subtask.parameters or {}).get('_hc_subtask_id')
+        if hc_subtask_id:
+            try:
+                hc = SubTask.objects.get(id=hc_subtask_id)
+                if (hc.status.upper() in NON_FINAL_STATES and hc.job_id
+                        and hc.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc')):
+                    _hc_slurm_status = slurm_api.get_job_status(hc.job_id)
+                    if _hc_slurm_status:
+                        _hc_slurm_status = _hc_slurm_status.rstrip('+').upper()
+                        if _hc_slurm_status != hc.status:
+                            hc.status = _hc_slurm_status
+                            hc.save()
+            except Exception:
+                pass
+
     # 1. 如果数据库状态已经是终态，直接返回
     if current_db_status.upper() not in NON_FINAL_STATES:
         return Response({
