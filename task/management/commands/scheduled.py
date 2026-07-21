@@ -93,7 +93,7 @@ class Command(BaseCommand):
         try:
             current_time = datetime.datetime.now()
             # 写在项目外, 避免 StatReloader 误判文件变更触发无限重启
-            log_dir = "/home/platform/project/scdb_api_logs"
+            log_dir = "/home/platform/project/scdb_platform/scdb_api_logs"
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, "update.txt")
             with open(log_path, 'a+') as f:
