@@ -345,57 +345,55 @@ def create_subtask(request):
         # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
         needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'commot')
         if needs_hierarchical_clustering:
-            hc_result_dir = os.path.join(local_settings.USERTASKPATH, usertask_dir, f'dataset_{dataset_uuid}', 'subtask_hierarchical_clustering', 'result', 'he', 'HierarchicalClustering')
-            if not (os.path.isdir(hc_result_dir) and os.listdir(hc_result_dir)):
-                hc_params = parameters_dict.copy()
-                hc_params['sub_type'] = 'hierarchical_clustering'
-                if 'organParts' not in hc_params:
-                    hc_params['organParts'] = ''
-                if 'projectname' not in hc_params:
-                    hc_params['projectname'] = 'test'
-                hc_module = cls('hierarchical_clustering', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hc_params)
-                hc_job_id = hc_module.process()
-                if hc_job_id and hc_job_id != 'skipped_existing':
-                    new_submodule.add_dependency(hc_module)
-                    # Create HC SubTask record and store in viewer params for tracking
-                    hc_subtask = SubTask.objects.create(
-                        main_task=main_task,
-                        subtask_type='hierarchical_clustering',
-                        dataset_path=dataset_id,
-                        status='Running',
-                        job_id=hc_job_id,
-                        parameters=hc_params
-                    )
-                    parameters_dict['_hc_subtask_id'] = hc_subtask.id
-                    parameters_dict['_hc_job_id'] = hc_job_id
-                    print(f'Auto-created HC subtask id={hc_subtask.id}, job_id={hc_job_id}')
+            # Always re-submit HC on re-run (old file-existence guard removed to allow re-runs)
+            hc_params = parameters_dict.copy()
+            hc_params['sub_type'] = 'hierarchical_clustering'
+            if 'organParts' not in hc_params:
+                hc_params['organParts'] = ''
+            if 'projectname' not in hc_params:
+                hc_params['projectname'] = 'test'
+            hc_module = cls('hierarchical_clustering', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hc_params)
+            hc_job_id = hc_module.process()
+            if hc_job_id:
+                new_submodule.add_dependency(hc_module)
+                # Create HC SubTask record and store in viewer params for tracking
+                hc_subtask = SubTask.objects.create(
+                    main_task=main_task,
+                    subtask_type='hierarchical_clustering',
+                    dataset_path=dataset_id,
+                    status='Running',
+                    job_id=hc_job_id,
+                    parameters=hc_params
+                )
+                parameters_dict['_hc_subtask_id'] = hc_subtask.id
+                parameters_dict['_hc_job_id'] = hc_job_id
+                print(f'Auto-created HC subtask id={hc_subtask.id}, job_id={hc_job_id}')
 
         # Auto-chain he_scatter as prerequisite for annotation_mapping
         needs_he_scatter = subtasktype == 'annotation_mapping'
         if needs_he_scatter:
-            he_scatter_result = os.path.join(local_settings.USERTASKPATH, usertask_dir, f'dataset_{dataset_uuid}', 'subtask_he_scatter', 'result', 'he', 'all_merged_data_with_labels.csv')
-            if not os.path.isfile(he_scatter_result):
-                hs_params = parameters_dict.copy()
-                hs_params['sub_type'] = 'he_scatter'
-                if 'organParts' not in hs_params:
-                    hs_params['organParts'] = ''
-                if 'projectname' not in hs_params:
-                    hs_params['projectname'] = 'test'
-                hs_module = cls('he_scatter', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hs_params)
-                hs_job_id = hs_module.process()
-                if hs_job_id and hs_job_id != 'skipped_existing':
-                    new_submodule.add_dependency(hs_module)
-                    hs_subtask = SubTask.objects.create(
-                        main_task=main_task,
-                        subtask_type='he_scatter',
-                        dataset_path=dataset_id,
-                        status='Running',
-                        job_id=hs_job_id,
-                        parameters=hs_params
-                    )
-                    parameters_dict['_hs_subtask_id'] = hs_subtask.id
-                    parameters_dict['_hs_job_id'] = hs_job_id
-                    print(f'Auto-created HE scatter subtask id={hs_subtask.id}, job_id={hs_job_id}')
+            # Always re-submit he_scatter on re-run (old file-existence guard removed to allow re-runs)
+            hs_params = parameters_dict.copy()
+            hs_params['sub_type'] = 'he_scatter'
+            if 'organParts' not in hs_params:
+                hs_params['organParts'] = ''
+            if 'projectname' not in hs_params:
+                hs_params['projectname'] = 'test'
+            hs_module = cls('he_scatter', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hs_params)
+            hs_job_id = hs_module.process()
+            if hs_job_id:
+                new_submodule.add_dependency(hs_module)
+                hs_subtask = SubTask.objects.create(
+                    main_task=main_task,
+                    subtask_type='he_scatter',
+                    dataset_path=dataset_id,
+                    status='Running',
+                    job_id=hs_job_id,
+                    parameters=hs_params
+                )
+                parameters_dict['_hs_subtask_id'] = hs_subtask.id
+                parameters_dict['_hs_job_id'] = hs_job_id
+                print(f'Auto-created HE scatter subtask id={hs_subtask.id}, job_id={hs_job_id}')
 
         # Explicit flow: commot/cellchat/spider require an already-completed SC-ST Mapping
         # output for the chosen method (user runs SC-ST Mapping first). Reject if missing

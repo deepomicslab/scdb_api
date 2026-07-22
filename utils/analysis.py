@@ -1640,12 +1640,6 @@ class SubScstquery(Module):
             self.status = 'Completed'
             self.job_id = 'viewer_only'
             return self.job_id
-        if self.subtask_type == 'hierarchical_clustering':
-            output_check = os.path.join(self.path, 'result/he/HierarchicalClustering')
-            if os.path.isdir(output_check) and os.listdir(output_check):
-                self.status = 'Completed'
-                self.job_id = 'skipped_existing'
-                return self.job_id
         if self.subtask_type == 'annotation_mapping':
             # routing-only; actual work delegated to he_scatter
             if self.dependencies:
