@@ -64,22 +64,28 @@ class Module:
             if not uuid:
                 return {'completed_methods': [], 'running_methods': [], 'status': 'error', 'message': 'Cannot resolve dataset UUID'}
             methods = []
-            map_dir = os.path.join(self.path, 'dataset_' + uuid, 'subtask_scst_mapping', 'result')
+            ds_base = os.path.join(self.path, 'dataset_' + uuid)
+            # cytospace / tangram: result under subtask_scst_mapping
+            map_dir = os.path.join(ds_base, 'subtask_scst_mapping', 'result')
             if os.path.exists(os.path.join(map_dir, 'cytospace', 'input_sc_spatial.h5ad')):
                 methods.append('cytospace')
             if os.path.exists(os.path.join(map_dir, 'tangram', 'input_sc_spatial.h5ad')):
                 methods.append('tangram')
+            # he_scatter / hierarchical_clustering: result under their own subtask dirs
+            if os.path.exists(os.path.join(ds_base, 'subtask_he_scatter', 'result', 'input_sc_spatial.h5ad')):
+                methods.append('he_scatter')
+            if os.path.exists(os.path.join(ds_base, 'subtask_hierarchical_clustering', 'result', 'input_sc_spatial.h5ad')):
+                methods.append('hierarchical_clustering')
             # Filter by main_task to prevent cross-task status leaking
             userpath = self.path.replace(local_settings.USERTASKPATH, '')
             main_task = task_model.objects.get(userpath=userpath)
             from django.db.models import Q
-            # Collect ALL concurrently-running mapping methods (not just one) so the
-            # frontend can show each method's running state independently when the user
-            # launches cytospace + tangram together. values_list on a JSON field is not
-            # portable across DB backends, so extract mapping_method in Python.
+            # Collect ALL concurrently-running mapping methods. cytospace/tangram run
+            # as scst_mapping subtasks; he_scatter/hc run as their own subtask types
+            # (triggered by annotation-mapping / recall-analysis auto-chain).
             running_qs = SubTaskModel.objects.filter(
                 main_task=main_task,
-                subtask_type='scst_mapping',
+                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering'],
                 dataset_path=dataset_id,
             ).filter(
                 Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
@@ -88,7 +94,14 @@ class Module:
             seen = set()
             for st in running_qs:
                 params = st.parameters if isinstance(st.parameters, dict) else {}
-                m = params.get('mapping_method')
+                if st.subtask_type == 'scst_mapping':
+                    m = params.get('mapping_method')
+                elif st.subtask_type == 'he_scatter':
+                    m = 'he_scatter'
+                elif st.subtask_type == 'hierarchical_clustering':
+                    m = 'hierarchical_clustering'
+                else:
+                    m = None
                 if m and m not in seen:
                     seen.add(m)
                     running_methods.append(m)
@@ -115,16 +128,19 @@ class Module:
             uuid = self._dataset_dir_key(dataset_id)
             if not uuid:
                 return {'status': 'fail', 'message': 'Cannot resolve dataset UUID'}
-            # Deterministic output filename (mirrors _resolve_mapping_output) instead of
-            # globbing *.h5ad[0], which can pick the wrong file.
-            if method == 'cytospace':
-                fname = 'input_sc_spatial.h5ad'
-            elif method == 'tangram':
-                fname = 'input_sc_spatial.h5ad'
+            fname = 'input_sc_spatial.h5ad'
+            ds_base = os.path.join(self.path, 'dataset_' + uuid)
+            if method in ('cytospace', 'tangram'):
+                h5ad_path = os.path.join(ds_base, 'subtask_scst_mapping',
+                                         'result', method, fname)
+            elif method == 'he_scatter':
+                h5ad_path = os.path.join(ds_base, 'subtask_he_scatter',
+                                         'result', fname)
+            elif method == 'hierarchical_clustering':
+                h5ad_path = os.path.join(ds_base, 'subtask_hierarchical_clustering',
+                                         'result', fname)
             else:
                 return {'status': 'fail', 'message': f'Unknown mapping method: {method}'}
-            h5ad_path = os.path.join(self.path, 'dataset_' + uuid,
-                                     'subtask_scst_mapping', 'result', method, fname)
             if not os.path.isfile(h5ad_path):
                 return {'status': 'fail', 'message': f'No mapping file found: {fname}'}
             return {'_stream_file': h5ad_path, 'filename': fname}
@@ -1599,13 +1615,18 @@ class SubScstquery(Module):
             raise ValueError(f"不支持的小种类: {subtask_type}")
 
     def _resolve_mapping_output(self, dataset_uuid, mapping_method='cytospace'):
-        map_dir = os.path.join(self.user_main_dir,
-                               'dataset_' + str(dataset_uuid), 'subtask_scst_mapping', 'result')
-        method_dir = os.path.join(map_dir, mapping_method)
-        if mapping_method == 'cytospace':
-            return os.path.join(method_dir, 'input_sc_spatial.h5ad')
-        elif mapping_method == 'tangram':
-            return os.path.join(method_dir, 'input_sc_spatial.h5ad')
+        if mapping_method in ('cytospace', 'tangram'):
+            map_dir = os.path.join(self.user_main_dir,
+                                   'dataset_' + str(dataset_uuid), 'subtask_scst_mapping', 'result')
+            return os.path.join(map_dir, mapping_method, 'input_sc_spatial.h5ad')
+        elif mapping_method == 'he_scatter':
+            return os.path.join(self.user_main_dir,
+                                'dataset_' + str(dataset_uuid),
+                                'subtask_he_scatter', 'result', 'input_sc_spatial.h5ad')
+        elif mapping_method == 'hierarchical_clustering':
+            return os.path.join(self.user_main_dir,
+                                'dataset_' + str(dataset_uuid),
+                                'subtask_hierarchical_clustering', 'result', 'input_sc_spatial.h5ad')
         else:
             raise ValueError('Unknown mapping_method: ' + str(mapping_method))
 
