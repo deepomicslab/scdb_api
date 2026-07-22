@@ -343,7 +343,7 @@ def create_subtask(request):
         new_submodule = cls(subtasktype, usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, parameters_dict)  # __init__(name, uuid, marker_path, params)
 
         # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
-        needs_hierarchical_clustering = subtasktype in ('recall_analysis', 'commot')
+        needs_hierarchical_clustering = subtasktype == 'recall_analysis'
         if needs_hierarchical_clustering:
             # Always re-submit HC on re-run (old file-existence guard removed to allow re-runs)
             hc_params = parameters_dict.copy()
