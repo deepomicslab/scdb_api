@@ -105,9 +105,33 @@ class Module:
                 if m and m not in seen:
                     seen.add(m)
                     running_methods.append(m)
-            return {'completed_methods': methods, 'running_methods': running_methods, 'status': 'success'}
+            # Collect failed mapping methods (non-completed, non-active terminal states)
+            failed_qs = SubTaskModel.objects.filter(
+                main_task=main_task,
+                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering'],
+                dataset_path=dataset_id,
+            ).exclude(
+                Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
+                | Q(status__iexact='completed')
+            )
+            failed_methods = []
+            seen_failed = set()
+            for st in failed_qs:
+                params = st.parameters if isinstance(st.parameters, dict) else {}
+                if st.subtask_type == 'scst_mapping':
+                    m = params.get('mapping_method')
+                elif st.subtask_type == 'he_scatter':
+                    m = 'he_scatter'
+                elif st.subtask_type == 'hierarchical_clustering':
+                    m = 'hierarchical_clustering'
+                else:
+                    m = None
+                if m and m not in seen_failed:
+                    seen_failed.add(m)
+                    failed_methods.append({'method': m, 'subtask_id': st.id})
+            return {'completed_methods': methods, 'running_methods': running_methods, 'failed_methods': failed_methods, 'status': 'success'}
         except Exception as e:
-            return {'completed_methods': [], 'running_methods': [], 'status': 'error', 'message': str(e)}
+            return {'completed_methods': [], 'running_methods': [], 'failed_methods': [], 'status': 'error', 'message': str(e)}
 
     def _extract_dataset_uuid(self, dataset_path):
         """Extract UUID from dataset_path (format: .../st_marker/<uuid>/...).
@@ -738,18 +762,29 @@ class Scstquery(Module):
 
         return res
     
-    def _get_commot_result_dir(self, dataset_name):
+    def _get_commot_result_dir(self, dataset_name, mapping_method=None):
         print(f"[commot] looking up dataset: {dataset_name}")
+        if getattr(self, '_is_demo', False):
+            demo_dir = os.path.join(self.path, 'result', 'commot')
+            if os.path.isdir(demo_dir):
+                return demo_dir
         try:
             from dataset.models import Dataset
             ds = Dataset.objects.get(dataset_id=dataset_name)
             uuid = ds.title
-            result_dir = os.path.join(self.path, f'dataset_{uuid}', 'subtask_commot', 'result')
-            print(f"[commot] file_path: {ds.file_path}")
-            print(f"[commot] uuid: {uuid}")
-            print(f"[commot] result_dir: {result_dir}")
-            print(f"[commot] result_dir exists: {os.path.isdir(result_dir)}")
-            return result_dir
+            base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_commot', 'result')
+            print(f"[commot] result_dir base: {base}")
+            # New path: sc_st_mapping/{method}/
+            if mapping_method:
+                new_dir = os.path.join(base, 'sc_st_mapping', mapping_method)
+                if os.path.isdir(new_dir):
+                    print(f"[commot] using method dir: {new_dir}")
+                    return new_dir
+            # Fallback: old flat path
+            if os.path.isdir(base):
+                print(f"[commot] using flat dir: {base}")
+                return base
+            return None
         except Exception as e:
             print(f"[commot] Dataset lookup failed: {e}")
         return None
@@ -763,8 +798,8 @@ class Scstquery(Module):
         print(f"[commot] found {len(files)} files: {[os.path.basename(f) for f in files]}")
         return files[0] if files else None
 
-    def getLRPairs(self, dataset):
-        result_dir = self._get_commot_result_dir(dataset)
+    def getLRPairs(self, dataset, mapping_method=None):
+        result_dir = self._get_commot_result_dir(dataset, mapping_method)
         file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
         if not file_path:
             return {'LR_pairs': [], 'status': 'error', 'message': f'Commot result not found for {dataset}'}
@@ -777,8 +812,8 @@ class Scstquery(Module):
         res = {'LR_pairs': lr_pairs.tolist(), 'status': 'success'}
         return res
 
-    def getReceivedSignalStrength(self, dataset, lr_pair):
-        result_dir = self._get_commot_result_dir(dataset)
+    def getReceivedSignalStrength(self, dataset, lr_pair, mapping_method=None):
+        result_dir = self._get_commot_result_dir(dataset, mapping_method)
         file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
         if not file_path:
             return {'receiver_strength': {}, 'status': 'error', 'message': f'Commot result not found for {dataset}'}
@@ -796,11 +831,18 @@ class Scstquery(Module):
         res = {'receiver_strength': df.to_dict(orient='index'), 'status': 'success'}
         return res
     
-    def getNetworkData(self, dataset, type):
+    def getNetworkData(self, dataset, type, mapping_method=None):
+        base = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result")
+        if mapping_method:
+            method_base = os.path.join(base, "sc_st_mapping", mapping_method)
+        else:
+            method_base = base
         if type == 'weight':
-            file_path = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result", "cellchat/network/result_data_weight.json")
+            file_path = os.path.join(method_base, "cellchat/network/result_data_weight.json")
         elif type == 'count':
-            file_path = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result", "cellchat/network/result_data_count.json")
+            file_path = os.path.join(method_base, "cellchat/network/result_data_count.json")
+        else:
+            return {'network_data': {}, 'status': 'error', 'message': f'Unknown type: {type}'}
 
         if not os.path.exists(file_path):
             return {'network_data': {}, 'status': 'error', 'message': f'File not found: {file_path}'}
@@ -942,23 +984,33 @@ class Scstquery(Module):
             raise RuntimeError("Output file not created")
 
     
-    def _find_cellchat_rds(self, dataset):
+    def _find_cellchat_rds(self, dataset, mapping_method=None):
         """根据 dataset_id 定位 subtask_cellchat 的 RDS 文件"""
         if getattr(self, '_is_demo', False):
+            if mapping_method:
+                method_path = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, 'cellchat_result.rds')
+                if os.path.exists(method_path):
+                    return method_path
             rds_files = glob.glob(os.path.join(self.path, 'result', 'cellchat', '*.rds'))
             return rds_files[0] if rds_files else None
         if not dataset:
             raise ValueError('dataset is required')
-        # 目录键统一为 Dataset.title(与写侧/其他读 helper 一致),不再双读
         try:
             db_obj = Dataset.objects.get(dataset_id=dataset)
         except Dataset.DoesNotExist:
             return None
-        rds_path = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result', 'cellchat_result.rds')
-        return rds_path if os.path.exists(rds_path) else None
+        base = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result')
+        # New path: sc_st_mapping/{method}/ or sc/
+        if mapping_method:
+            new_path = os.path.join(base, 'sc_st_mapping', mapping_method, 'cellchat_result.rds')
+            if os.path.exists(new_path):
+                return new_path
+        # Fallback: old flat path
+        old_path = os.path.join(base, 'cellchat_result.rds')
+        return old_path if os.path.exists(old_path) else None
 
-    def getCellChatPathways(self, dataset=None):
-        rds_path = self._find_cellchat_rds(dataset)
+    def getCellChatPathways(self, dataset=None, mapping_method=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
@@ -969,8 +1021,8 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatCircleData(self, pathway, dataset=None):
-        rds_path = self._find_cellchat_rds(dataset)
+    def getCellChatCircleData(self, pathway, dataset=None, mapping_method=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
@@ -981,8 +1033,8 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatSpatialData(self, pathway, dataset=None):
-        rds_path = self._find_cellchat_rds(dataset)
+    def getCellChatSpatialData(self, pathway, dataset=None, mapping_method=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
@@ -993,8 +1045,8 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatHeatmapData(self, LR_pair, dataset=None):
-        rds_path = self._find_cellchat_rds(dataset)
+    def getCellChatHeatmapData(self, LR_pair, dataset=None, mapping_method=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
@@ -1005,8 +1057,8 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatLRPairs(self, dataset=None):
-        rds_path = self._find_cellchat_rds(dataset)
+    def getCellChatLRPairs(self, dataset=None, mapping_method=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
@@ -1017,21 +1069,30 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def _find_spider_h5ad(self, dataset_id):
+    def _find_spider_h5ad(self, dataset_id, mapping_method=None):
         if dataset_id:
             try:
                 ds = Dataset.objects.get(dataset_id=dataset_id)
                 uuid = ds.title
-                return os.path.join(self.path, f'dataset_{uuid}', 'subtask_spider', 'result', 'adata_spider.h5ad')
+                base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_spider', 'result')
+                # New path: sc_st_mapping/{method}/
+                if mapping_method:
+                    new_path = os.path.join(base, 'sc_st_mapping', mapping_method, 'adata_spider.h5ad')
+                    if os.path.exists(new_path):
+                        return new_path
+                # Fallback: old flat path
+                old_path = os.path.join(base, 'adata_spider.h5ad')
+                if os.path.exists(old_path):
+                    return old_path
             except Dataset.DoesNotExist:
                 pass
         return os.path.join(self.path, 'result/spider/adata_spider.h5ad')
 
-    def getSpiderInit(self, dataset=None):
+    def getSpiderInit(self, dataset=None, mapping_method=None):
         """
         SPIDER 接口1：初始化，返回 Metadata 和 Coordinates
         """
-        h5ad_path = self._find_spider_h5ad(dataset)
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
 
@@ -1096,11 +1157,11 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getSpiderPatternData(self, dataset=None, pattern_id=None):
+    def getSpiderPatternData(self, dataset=None, pattern_id=None, mapping_method=None):
         """
         SPIDER 接口2：获取指定 Pattern 的评分
         """
-        h5ad_path = self._find_spider_h5ad(dataset)
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         try:
             if pattern_id is None:
                 raise ValueError("Pattern ID is required")
@@ -1121,11 +1182,11 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderLRData(self, dataset=None, lr_name=None):
+    def getSpiderLRData(self, dataset=None, lr_name=None, mapping_method=None):
         """
         SPIDER 接口3：获取指定 LR 的表达量
         """
-        h5ad_path = self._find_spider_h5ad(dataset)
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         try:
             if not lr_name:
                 raise ValueError("LR Name is required")
@@ -1152,10 +1213,22 @@ class Scstquery(Module):
         except Exception as e:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderSpearmanData(self, dataset=None):
+    def getSpiderSpearmanData(self, dataset=None, mapping_method=None):
         base_dir = os.path.join(self.path, f'dataset_{dataset}', 'subtask_spider', 'result') if dataset else os.path.join(self.path, 'result/spider')
-        sc_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc.csv')
-        sc_st_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc_st.csv')
+        # If mapping_method specified, try method-specific subdirectory first
+        if mapping_method:
+            method_dir = os.path.join(base_dir, 'sc_st_mapping', mapping_method)
+            method_sc_path = os.path.join(method_dir, 'spearman/lr_level_spearman_correlation_sc.csv')
+            method_sc_st_path = os.path.join(method_dir, 'spearman/lr_level_spearman_correlation_sc_st.csv')
+            if os.path.exists(method_sc_st_path):
+                sc_path = method_sc_path
+                sc_st_path = method_sc_st_path
+            else:
+                sc_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc.csv')
+                sc_st_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc_st.csv')
+        else:
+            sc_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc.csv')
+            sc_st_path = os.path.join(base_dir, 'spearman/lr_level_spearman_correlation_sc_st.csv')
         
         results = []
         
@@ -1354,31 +1427,31 @@ class Scstquery(Module):
         elif resulttype == 'hierarchicalClusteringMarkerGeneExpressions':
             return self.getHierarchicalClusteringMarkerGeneExpressions(query_params.get('dataset'), query_params.get('cluster'), query_params.get('gene'))
         elif resulttype == 'LRPairs':
-            return self.getLRPairs(query_params.get('dataset'))
+            return self.getLRPairs(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'LRreceivedSignalStrength':
-            return self.getReceivedSignalStrength(query_params.get('dataset'), query_params.get('lr_pair'))
+            return self.getReceivedSignalStrength(query_params.get('dataset'), query_params.get('lr_pair'), query_params.get('mapping_method'))
         elif resulttype == 'networkData':
-            return self.getNetworkData(query_params.get('dataset'), query_params.get('type'))
+            return self.getNetworkData(query_params.get('dataset'), query_params.get('type'), query_params.get('mapping_method'))
         elif resulttype == 'img_path':
             return self.getImgpath(query_params.get('analysis_type'), query_params.get('img_id'))
         elif resulttype == 'cellchat_pathways':
-            return self.getCellChatPathways(query_params.get('dataset'))
+            return self.getCellChatPathways(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'cellchat_circle':
-            return self.getCellChatCircleData(query_params.get('pathway'), query_params.get('dataset'))
+            return self.getCellChatCircleData(query_params.get('pathway'), query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'cellchat_spatial':
-            return self.getCellChatSpatialData(query_params.get('pathway'), query_params.get('dataset'))
+            return self.getCellChatSpatialData(query_params.get('pathway'), query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'cellchat_heatmap':
-            return self.getCellChatHeatmapData(query_params.get('LR_pair'), query_params.get('dataset'))
+            return self.getCellChatHeatmapData(query_params.get('LR_pair'), query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'cellchat_lrpairs':
-            return self.getCellChatLRPairs(query_params.get('dataset'))
+            return self.getCellChatLRPairs(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'spider_init':
-            return self.getSpiderInit(query_params.get('dataset'))
+            return self.getSpiderInit(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'spider_pattern':
-            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'))
+            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'), query_params.get('mapping_method'))
         elif resulttype == 'spider_lr':
-            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'))
+            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'), query_params.get('mapping_method'))
         elif resulttype == 'spider_spearman':
-            return self.getSpiderSpearmanData(query_params.get('dataset'))
+            return self.getSpiderSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'scstmappingStatus':
             return self._scstmappingStatusFallback(query_params.get('dataset'))
         else:
@@ -1416,33 +1489,33 @@ class Scstquery(Module):
         elif resulttype == 'hierarchicalClusteringMarkerGeneExpressions':
             return self.getHierarchicalClusteringMarkerGeneExpressions(query_params.get('dataset'), query_params.get('cluster'), query_params.get('gene'))
         elif resulttype == 'LRPairs':
-            return self.getLRPairs(query_params.get('dataset'))
+            return self.getLRPairs(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'LRreceivedSignalStrength':
-            return self.getReceivedSignalStrength(query_params.get('dataset'), query_params.get('lr_pair'))
+            return self.getReceivedSignalStrength(query_params.get('dataset'), query_params.get('lr_pair'), query_params.get('mapping_method'))
         elif resulttype == 'cellchat_pathways':
-            return self.getCellChatPathways()
+            return self.getCellChatPathways(mapping_method=query_params.get('mapping_method'))
         elif resulttype == 'cellchat_circle':
-            return self.getCellChatCircleData(query_params.get('pathway'))
+            return self.getCellChatCircleData(query_params.get('pathway'), mapping_method=query_params.get('mapping_method'))
         elif resulttype == 'cellchat_spatial':
-            return self.getCellChatSpatialData(query_params.get('pathway'))
+            return self.getCellChatSpatialData(query_params.get('pathway'), mapping_method=query_params.get('mapping_method'))
         elif resulttype == 'cellchat_heatmap':
-            return self.getCellChatHeatmapData(query_params.get('LR_pair'))
+            return self.getCellChatHeatmapData(query_params.get('LR_pair'), mapping_method=query_params.get('mapping_method'))
         elif resulttype == 'cellchat_lrpairs':
-            return self.getCellChatLRPairs()
+            return self.getCellChatLRPairs(mapping_method=query_params.get('mapping_method'))
         elif resulttype == 'spider_init':
             # 获取元数据和坐标
-            return self.getSpiderInit(query_params.get('dataset'))
+            return self.getSpiderInit(query_params.get('dataset'), query_params.get('mapping_method'))
             
         elif resulttype == 'spider_pattern':
             # 获取特定 Pattern 的数值
-            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'))
+            return self.getSpiderPatternData(query_params.get('dataset'), query_params.get('pattern_id'), query_params.get('mapping_method'))
             
         elif resulttype == 'spider_lr':
             # 获取特定 LR 的数值
-            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'))
+            return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'), query_params.get('mapping_method'))
         elif resulttype == 'spider_spearman':
             # --- 新增：Spearman 分析数据接口 ---
-            return self.getSpiderSpearmanData(query_params.get('dataset'))
+            return self.getSpiderSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'scstmappingStatus':
             return self._scstmappingStatusFallback(query_params.get('dataset'))
         elif resulttype == 'AlphaTalk':
@@ -1545,9 +1618,19 @@ class SubScstquery(Module):
         elif subtask_type == "commot":
             mapping_method = self.params.get('mapping_method', 'cytospace')
             mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            os.makedirs(outputdir, exist_ok=True)
+            signaling_type = params.get('signaling_type', 'Secreted Signaling')
+            dis_thr = str(params.get('dis_thr', 500))
+            min_cell_pct = str(params.get('min_cell_pct', 0.05))
+            n_permutations = str(params.get('n_permutations', 100))
             self.script_arguments = [
                 mapping_h5ad,
-                outputdir
+                outputdir,
+                signaling_type,
+                dis_thr,
+                min_cell_pct,
+                n_permutations
             ]
             self.shell_script = "/data3/platform/sc_db/commot/run_commot.sh"
         elif subtask_type == "cellchat":
@@ -1562,10 +1645,16 @@ class SubScstquery(Module):
             min_cells = params.get('min_cells', 10)        # 整数
             contact_range = params.get('contact_range', 100) # ST专用
             scale_distance = params.get('scale_distance', 50) # ST专用
+            zero_dist_handle = params.get('zero_dist_handle', 'jitter')  # ST only
 
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            if datatype == 'sc':
+                outputdir = os.path.join(self.path, 'result', 'sc', '')
+            else:
+                outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            os.makedirs(outputdir, exist_ok=True)
             output_filepath = os.path.join(outputdir, "cellchat_result.rds")
             
-            mapping_method = self.params.get('mapping_method', 'cytospace')
             mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
                 mapping_h5ad,          # $1: input h5ad (mapping output)
@@ -1575,7 +1664,8 @@ class SubScstquery(Module):
                 datatype,             # $5: Datatype
                 str(min_cells),       # $6: Min Cells (转字符串)
                 str(contact_range),   # $7: Contact Range
-                str(scale_distance)   # $8: Scale Distance
+                str(scale_distance),  # : Scale Distance (auto-calculated in R)
+                zero_dist_handle     # : Same-spot cell handling
             ]
             
             print(f"CellChat Args: {self.script_arguments}")
@@ -1591,6 +1681,8 @@ class SubScstquery(Module):
 
             mapping_method = self.params.get('mapping_method', 'cytospace')
             mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            os.makedirs(outputdir, exist_ok=True)
             self.script_arguments = [
                 mapping_h5ad,
                 outputdir,
@@ -1610,7 +1702,17 @@ class SubScstquery(Module):
                 raise ValueError(f"Unknown mapping_method: {mapping_method}")
             method_outputdir = os.path.join(outputdir, mapping_method)
             os.makedirs(method_outputdir, exist_ok=True)
-            self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
+            if mapping_method == 'tangram':
+                tg_mode = params.get('mode', 'cells')
+                tg_cluster_label = params.get('cluster_label', 'cell_type')
+                tg_target_count = str(params.get('target_count', 5000))
+                self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir, tg_mode, tg_cluster_label, tg_target_count]
+            elif mapping_method == 'cytospace':
+                cs_mcn = str(params.get('mean_cell_numbers', 2))
+                cs_dm = params.get('distance_metric', 'Pearson_correlation')
+                self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir, cs_mcn, cs_dm]
+            else:
+                self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
         else:
             raise ValueError(f"不支持的小种类: {subtask_type}")
 

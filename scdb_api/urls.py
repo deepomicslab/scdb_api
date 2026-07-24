@@ -45,6 +45,7 @@ urlpatterns = [
     #subtask create
     path('tasks/createsubtask/', task.views.create_subtask),
     path('tasks/subtask/status/', task.views.subtask_status_update),
+    path('tasks/subtask/log/', task.views.subtask_log),
     
     # path('dataset/index/', dataset.views.index_data),
     path('dataset/index/stats/global/', dataset.views.global_stats),    # 顶部数据

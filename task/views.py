@@ -628,3 +628,89 @@ def subtask_status_update(request):
         traceback.print_exc()
         res['message'] = f'SLURM 状态查询失败: {str(e)}'
         return Response(res, status=500)
+@api_view(['GET'])
+def subtask_log(request):
+    """Return the last 500 lines of a subtask's SLURM log file."""
+    subtaskid = request.query_params.get('subtaskid')
+    if not subtaskid:
+        return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
+    try:
+        subtask = SubTask.objects.get(id=subtaskid)
+    except SubTask.DoesNotExist:
+        return Response({'status': 'Failed', 'message': f'SubTask {subtaskid} not found.'}, status=404)
+
+    job_id = subtask.job_id
+    subtask_type = subtask.subtask_type
+    params = subtask.parameters if isinstance(subtask.parameters, dict) else {}
+
+    if not job_id or job_id in ('viewer_only', 'skipped_existing', 'pending_hc', 'pending_he_scatter'):
+        return Response({'status': 'Failed', 'message': f'No SLURM log for job_id={job_id}.'}, status=400)
+
+    mapping_method = params.get('mapping_method') if subtask_type == 'scst_mapping' else None
+
+    LOG_PATH_MAP = {
+        ('scst_mapping', 'cytospace'): '/data3/platform/sc_db/1218test/cytospace/logs/cytospace_{job_id}.out',
+        ('scst_mapping', 'tangram'):   '/data3/platform/sc_db/tangram/logs/tangram_{job_id}.out',
+        ('commot', None):              '/data3/platform/sc_db/commot/logs/commot_{job_id}.out',
+        ('cellchat', None):            '/data3/platform/sc_db/cellchat/logs/cellchat_{job_id}.out',
+        ('spider', None):              '/data3/platform/sc_db/spider/logs/spider_{job_id}.out',
+        ('he_scatter', None):          '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/he_scatter_{job_id}.out',
+        ('hierarchical_clustering', None): '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/hc_{job_id}.out',
+    }
+
+    log_pattern = LOG_PATH_MAP.get((subtask_type, mapping_method))
+    if not log_pattern:
+        return Response({'status': 'Failed', 'message': f'No log path mapping for ({subtask_type}, {mapping_method}).'}, status=400)
+
+    log_path = log_pattern.format(job_id=job_id)
+    try:
+        with open(log_path, 'r', errors='replace') as f:
+            lines = f.readlines()
+        # --- Extract error-relevant lines ---
+        import re
+        # Patterns that indicate error context
+        error_keywords = re.compile(
+            r'(?i)(traceback|error|exception|failed|fatal|slurmstepd|'
+            r'cannot|unable to|no such file|permission denied|'
+            r'keyerror|valueerror|filenotfound|runtimeerror|'
+            r'assertionerror|memoryerror|timeout|killed)'
+        )
+        # Collect error blocks: Traceback sections + keyword lines with context
+        error_lines = []
+        in_traceback = False
+        for i, line in enumerate(lines):
+            if 'Traceback (most recent call last):' in line:
+                in_traceback = True
+                error_lines.append(i)
+                continue
+            if in_traceback:
+                # Traceback body: indented lines or the final error line
+                if line.startswith(' ') or line.startswith('	') or line.strip() == '':
+                    error_lines.append(i)
+                else:
+                    in_traceback = False
+                    # Check if this is the final error line (non-indented, after traceback)
+                    if error_keywords.search(line):
+                        error_lines.append(i)
+            elif error_keywords.search(line):
+                # Add context: 2 lines before and after
+                for j in range(max(0, i - 2), min(len(lines), i + 3)):
+                    if j not in error_lines:
+                        error_lines.append(j)
+        # Deduplicate and sort
+        error_lines = sorted(set(error_lines))
+        if error_lines:
+            selected = [lines[i] for i in error_lines]
+        else:
+            # Fallback: last 30 lines
+            selected = lines[-30:]
+        log_content = ''.join(selected)
+        # --- Sanitize sensitive paths ---
+        log_content = re.sub(r'/data[23]/platform/\S+', '[DATA_PATH]', log_content)
+        log_content = re.sub(r'/data[23]/\S+', '[DATA_PATH]', log_content)
+        log_content = re.sub(r'/home/platform/\S+', '[PATH]', log_content)
+        return Response({'status': 'Success', 'log': log_content})
+    except FileNotFoundError:
+        return Response({'status': 'Failed', 'message': 'Log file not found.'}, status=404)
+    except Exception as e:
+        return Response({'status': 'Failed', 'message': str(e)}, status=500)
