@@ -14,7 +14,6 @@ from utils import slurm_api
 from utils.slurm_api import normalize_slurm_status
 from django.http import FileResponse
 import pandas as pd
-import utils.analysis 
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 from utils.mapping_paths import check_mapping_completed
