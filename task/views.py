@@ -81,12 +81,7 @@ def createtask(request):
     # get parameters from request
     parameters_string=request.data['parameters']
     try:
-    try:
         parameters_dict = json.loads(parameters_string)
-    except (json.JSONDecodeError, TypeError) as e:
-        res['status'] = 'Failed'
-        res['message'] = f'Invalid parameters JSON: {str(e)}'
-        return Response(res, status=400)
     except (json.JSONDecodeError, TypeError) as e:
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
