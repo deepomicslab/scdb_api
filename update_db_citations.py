@@ -53,8 +53,9 @@ def update_database():
             dataset.collection_url = collection_url
             dataset.explorer_url = explorer_url
             
-            # 保存 (只更新这几个字段，提高效率且不触发 Dataset.save 里的读取 h5ad 逻辑)
-            dataset.save(update_fields=['citation_label', 'citation_url', 'collection_url', 'explorer_url'])
+            # save() no longer reads h5ad by default (update_metadata=False),
+            # so this is safe without update_fields workaround
+            dataset.save()
             
             print(f"✅ [{index+1}] 更新成功: {dataset.dataset_id}")
             success_count += 1
