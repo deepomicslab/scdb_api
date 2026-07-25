@@ -35,7 +35,7 @@ def start_worker(socket_path, auth_key):
 
 if __name__ == '__main__':
     # 从命令行接收参数
-    if len(sys.path) < 3:
+    if len(sys.argv) < 3:
         # 默认参数 (测试用)
         socket = '/tmp/cellchat_r_socket'
         key = b'secret'

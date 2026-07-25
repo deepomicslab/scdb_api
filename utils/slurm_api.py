@@ -1,32 +1,9 @@
-import time
 import subprocess
-from slurmpy import Slurm
 from scdb_api import settings_local as local_settings
 import re
 import sys
 # statuslist = ['PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING', 'COMPLETED',
 #               'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL']
-
-
-def get_job_output(job_id):
-    path = local_settings.TASKLOG + \
-        'output/output_'+str(job_id)+'.output'
-    try:
-        with open(path, 'r') as f:
-            output = f.read()
-            return output
-    except:
-        return ''
-
-
-def get_job_error(job_id):
-    path = local_settings.TASKLOG+'error/error_'+str(job_id)+'.error'
-    try:
-        with open(path, 'r') as f:
-            output = f.read()
-            return output
-    except:
-        return ''
 
 
 def get_job_status(job_id):

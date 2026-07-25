@@ -80,7 +80,15 @@ def createtask(request):
 
     # get parameters from request
     parameters_string=request.data['parameters']
-    parameters_dict = json.loads(parameters_string)
+    try:
+    try:
+        parameters_dict = json.loads(parameters_string)
+    except (json.JSONDecodeError, TypeError) as e:
+        res['status'] = 'Failed'
+        res['message'] = f'Invalid parameters JSON: {str(e)}'
+        return Response(res, status=400)
+    except (json.JSONDecodeError, TypeError) as e:
+        return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
     # create task object
     res = {}
@@ -118,7 +126,7 @@ def createtask(request):
                 res['data'] = {'taskid': newtask.id}
         except Exception as e:
             res['status'] = 'Failed'
-            res['message'] = e
+            res['message'] = str(e)
             newtask.status = 'Failed'
             traceback.print_exc()
     newtask.save()
@@ -134,8 +142,12 @@ def viewtasklist(request):
 
 @api_view(['GET'])
 def taskdetailview(request):
-    taskid = request.query_params.dict()['taskid']
+    taskid = request.query_params.dict().get('taskid', '')
+    if not taskid:
+        return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
     taskobject = tasks.objects.filter(id=taskid)
+    if not taskobject.exists():
+        return Response({'status': 'error', 'message': 'Task not found'}, status=404)
     serializer = taskSerializer(taskobject, many=True)
     taskdata=serializer.data[0]
     taskdata['inputpath'] =   local_settings.FILEAPI+taskdata['userpath']+ '/upload/input.csv'
@@ -145,7 +157,12 @@ def taskdetailview(request):
 
 @api_view(['GET'])
 def getoutputfile(request, path):
-    file_path = local_settings.USERTASKPATH  + path
+    base_dir = os.path.realpath(local_settings.USERTASKPATH)
+    file_path = os.path.realpath(os.path.join(base_dir, path))
+    if not file_path.startswith(base_dir + os.sep) and file_path != base_dir:
+        return Response({'status': 'error', 'message': 'Access denied'}, status=403)
+    if not os.path.isfile(file_path):
+        return Response({'status': 'error', 'message': 'File not found'}, status=404)
     file = open(file_path, 'rb')
     response = FileResponse(file)
     filename = file.name.split('/')[-1]
@@ -165,7 +182,9 @@ def taskresultview(request):
     - casuality: cluster (optional)
     """
     query_params = request.query_params.dict()
-    taskid = query_params['taskid']
+    taskid = query_params.get('taskid', '')
+    if not taskid:
+        return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
     if 'testmode' in query_params and query_params['testmode'] == 'true':
         print("testmode")
         objectpath = local_settings.USERTASKPATH + 'demo_result/scst/moduleobject.pkl'
@@ -174,7 +193,10 @@ def taskresultview(request):
             module = pickle.load(f)
         res = module.gettestresult(query_params)
         return Response(res)
-    taskobject = tasks.objects.get(id=taskid)
+    try:
+        taskobject = tasks.objects.get(id=taskid)
+    except tasks.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Task not found'}, status=404)
     objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
     with open(objectpath, 'rb') as f:
         #载入模块对象
