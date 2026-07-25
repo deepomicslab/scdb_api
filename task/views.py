@@ -18,6 +18,7 @@ import pandas as pd
 import utils.analysis 
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
+from utils.mapping_paths import check_mapping_completed
 import pickle
 
 class taskViewSet(viewsets.ModelViewSet):
@@ -417,24 +418,15 @@ def create_subtask(request):
         # instead of auto-chaining a mapping job.
         if subtasktype in ('commot', 'cellchat', 'spider'):
             mapping_method = parameters_dict.get('mapping_method', 'cytospace')
-            dataset_result_base = os.path.join(local_settings.USERTASKPATH, usertask_dir,
-                                               f'dataset_{dataset_uuid}')
-            if mapping_method in ('cytospace', 'tangram'):
-                map_output = os.path.join(dataset_result_base, 'subtask_scst_mapping',
-                                          'result', mapping_method, 'input_sc_spatial.h5ad')
-            elif mapping_method == 'he_scatter':
-                map_output = os.path.join(dataset_result_base, 'subtask_he_scatter',
-                                          'result', 'input_sc_spatial.h5ad')
-            elif mapping_method == 'hierarchical_clustering':
-                map_output = os.path.join(dataset_result_base, 'subtask_hierarchical_clustering',
-                                          'result', 'input_sc_spatial.h5ad')
-            else:
+            mapping_base = os.path.join(local_settings.USERTASKPATH, usertask_dir)
+            try:
+                if not check_mapping_completed(mapping_base, dataset_uuid, mapping_method):
+                    res['status'] = 'Failed'
+                    res['message'] = f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."
+                    return Response(res, status=400)
+            except ValueError as e:
                 res['status'] = 'Failed'
-                res['message'] = f"Unknown mapping_method: {mapping_method}"
-                return Response(res, status=400)
-            if not os.path.isfile(map_output):
-                res['status'] = 'Failed'
-                res['message'] = f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."
+                res['message'] = str(e)
                 return Response(res, status=400)
 
         job_id = new_submodule.process()
@@ -665,17 +657,7 @@ def subtask_log(request):
 
     mapping_method = params.get('mapping_method') if subtask_type == 'scst_mapping' else None
 
-    LOG_PATH_MAP = {
-        ('scst_mapping', 'cytospace'): '/data3/platform/sc_db/1218test/cytospace/logs/cytospace_{job_id}.out',
-        ('scst_mapping', 'tangram'):   '/data3/platform/sc_db/tangram/logs/tangram_{job_id}.out',
-        ('commot', None):              '/data3/platform/sc_db/commot/logs/commot_{job_id}.out',
-        ('cellchat', None):            '/data3/platform/sc_db/cellchat/logs/cellchat_{job_id}.out',
-        ('spider', None):              '/data3/platform/sc_db/spider/logs/spider_{job_id}.out',
-        ('he_scatter', None):          '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/he_scatter_{job_id}.out',
-        ('hierarchical_clustering', None): '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/hc_{job_id}.out',
-    }
-
-    log_pattern = LOG_PATH_MAP.get((subtask_type, mapping_method))
+    log_pattern = getattr(local_settings, 'SLURM_LOG_PATHS', {}).get((subtask_type, mapping_method))
     if not log_pattern:
         return Response({'status': 'Failed', 'message': f'No log path mapping for ({subtask_type}, {mapping_method}).'}, status=400)
 
