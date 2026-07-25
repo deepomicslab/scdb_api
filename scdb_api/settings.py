@@ -10,9 +10,15 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
-## Import local settings
+from dotenv import load_dotenv
+
+# Load .env file from project root (scdb_api/.env)
+load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+
+## Import local settings (paths, scripts - no secrets here)
 try:
     from . import settings_local as local_settings
 except ImportError:
@@ -26,13 +32,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-q!*($f*-!*!()hl#v8c!!yuklef!26&4yye1du$)w&+f$$*cmc'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-dev-only-key-change-me')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 
 
 # Application definition
@@ -88,16 +92,14 @@ WSGI_APPLICATION = 'scdb_api.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 DATABASES = {
-    'default':
-    getattr(
-        local_settings, 'DATABASES', {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': 'phage',
-            'USER': 'postgres',
-            'PASSWORD': 'wAFQ63y!AEsH',
-            'HOST': 'localhost',
-            'PORT': '5432',
-        })
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'scdb_platform_dev'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+    }
 }
 
 
@@ -152,6 +154,5 @@ CRONJOBS = [
     ('*/1 * * * *', 'task.cron.task_status_updata')
 ]
 
-import os
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")

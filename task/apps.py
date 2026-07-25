@@ -38,7 +38,7 @@ class TaskConfig(AppConfig):
         # 通信 Socket 路径
         SOCKET_PATH = '/tmp/cellchat_r.sock'
         # 通信密钥
-        AUTH_KEY = b'cellchat_secret_key'
+        AUTH_KEY = os.environ.get('R_AUTH_KEY', 'cellchat_secret_key').encode()
         # ==========================================
 
         # 1. 启动子进程 (如果 socket 不存在)
