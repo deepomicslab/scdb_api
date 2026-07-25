@@ -411,7 +411,13 @@ class Scstquery(Module):
              return {'status': 'fail', 'message': str(e)}
 
         # 3. Load subtask info for this task
-        subtask_map = {}  # dataset_path -> {subtask_type: {id, status, job_id}}
+        # subtask_map: dataset_path -> {cache_key: {id, status, job_id, subtask_type, mapping_method}}
+        # For commot/cellchat/spider, cache_key includes mapping_method so that
+        # multiple per-method subtasks are preserved (e.g. "commot__cytospace",
+        # "commot__hierarchical_clustering") instead of being de-duplicated to
+        # only the latest one.
+        INTERACTION_TYPES = {'commot', 'cellchat', 'spider'}
+        subtask_map = {}
         try:
             from task.models import SubTask, tasks as task_model
             main_task = task_model.objects.get(userpath=self.path.replace(local_settings.USERTASKPATH, ''))
@@ -421,11 +427,19 @@ class Scstquery(Module):
                 dp = st.dataset_path
                 if dp not in subtask_map:
                     subtask_map[dp] = {}
-                if st.subtask_type not in subtask_map[dp]:
-                    subtask_map[dp][st.subtask_type] = {
+                params = st.parameters if isinstance(st.parameters, dict) else {}
+                mapping_method = params.get('mapping_method', '')
+                if mapping_method and st.subtask_type in INTERACTION_TYPES:
+                    cache_key = f"{st.subtask_type}__{mapping_method}"
+                else:
+                    cache_key = st.subtask_type
+                if cache_key not in subtask_map[dp]:
+                    subtask_map[dp][cache_key] = {
                         'id': st.id,
                         'status': st.status.lower(),
                         'job_id': st.job_id,
+                        'subtask_type': st.subtask_type,
+                        'mapping_method': mapping_method or None,
                     }
         except Exception:
             pass
