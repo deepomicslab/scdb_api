@@ -2,14 +2,12 @@ from django.shortcuts import render
 from task.models import tasks, SubTask, TaskStatus, SLURM_ACTIVE_STATES, PSEUDO_JOB_IDS
 from dataset.models import Dataset
 from task.serializers import taskSerializer
+from task.services import get_module_class, create_subtask as create_subtask_service
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import viewsets
 import os,traceback
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
-# Create your views here.
 import time,random,json
 from scdb_api import settings_local as local_settings
 from utils import slurm_api
@@ -110,20 +108,16 @@ def createtask(request):
     res = {}
     newtask = tasks.objects.create(
             name=request.data['taskname'], user=request.data['userid'], userpath=usertask_dir,
-            task_type=request.data['tasktype'], status='Created',modulelist=request.data['modulename'])
+            task_type=request.data['tasktype'], status=TaskStatus.CREATED, modulelist=request.data['modulename'])
     
     # create module object and run the task
     if newtask.task_type == 'module':
         try:
-            # run the task script
-            def get_class_from_module(module, class_name):
-                # 使用 getattr() 尝试从模块中获取类对象,如果类不存在，则返回 None
-                return getattr(module, class_name, None)
-            cls = get_class_from_module(utils.analysis,request.data['modulename'])
+            cls = get_module_class(request.data['modulename'])
             
             if cls is None:
                 res['status'] = 'Failed'
-                newtask.status = 'Failed'
+                newtask.status = TaskStatus.FAILED
                 res['message'] = 'module not found'
                 raise ValueError('module not found')
 
@@ -136,7 +130,7 @@ def createtask(request):
                     json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
                 with open(userpath+'/moduleobject.pkl', 'wb') as f:
                     pickle.dump(newmodule, f)
-                newtask.status = 'Running'
+                newtask.status = TaskStatus.RUNNING
                 res['status'] = 'Success'
                 res['message'] = 'task create successfully'
                 res['data'] = {'taskid': newtask.id}
@@ -309,172 +303,44 @@ def getImg(request):
 @api_view(['POST'])
 def create_subtask(request):
     """
-    创建 scst 子任务（硬编码 SubScstquery 模块，自理目录/文件）
+    创建 scst 子任务
     - taskid (主任务 ID)
     - userid
     - dataset_path (数据集 ID)
-    - subtasktype (子任务类型，如 "xx1")
-    - parameters (JSON 字符串，e.g., {"k": 10, "sub_type": "hierarchical"})
+    - subtasktype (子任务类型)
+    - parameters (JSON 字符串)
     """
-    res = {}
     taskid = request.data.get('taskid')
     userid = request.data.get('userid')
-    dataset_path = request.data.get('dataset_path')  # marker_path (legacy, 仍用于 getDatasetInfo 读文件)
-    dataset_id = request.data.get('dataset_id', '')   # Kidney_Cancer_001 — 身份令牌,存入 SubTask.dataset_path
+    dataset_path = request.data.get('dataset_path')
+    dataset_id = request.data.get('dataset_id', '')
     subtasktype = request.data.get('subtasktype')
-    print(taskid, userid, dataset_path, subtasktype)
+
     if not taskid or not userid or not dataset_path or not subtasktype:
-        res['status'] = 'Failed'
-        res['message'] = '缺少 taskid、userid、dataset_path 或 subtasktype'
-        return Response(res, status=400)
+        return Response({'status': 'Failed', 'message': '缺少 taskid、userid、dataset_path 或 subtasktype'}, status=400)
 
     try:
         main_task = tasks.objects.get(id=taskid, user=userid)
-        # if main_task.status != 'Completed':
-        #     return Response({'status': 'Failed', 'message': '主任务未完成'}, status=400)
     except tasks.DoesNotExist:
-        res['status'] = 'Failed'
-        res['message'] = '任务不存在'
-        return Response(res, status=404)
+        return Response({'status': 'Failed', 'message': '任务不存在'}, status=404)
 
-    # 解析参数，并加路径信息（供模块用）
     parameters_string = request.data.get('parameters')
     if not parameters_string:
-        res['status'] = 'Failed'
-        res['message'] = '缺少 parameters'
-        return Response(res, status=400)
-    parameters_dict = json.loads(parameters_string)
-    usertask_dir = main_task.userpath
-    parameters_dict['userid'] = userid
-    if 'projectname' not in parameters_dict:
-        parameters_dict['projectname'] = 'test'
-
-    # 创建子任务记录
-    new_subtask = SubTask.objects.create(
-        main_task=main_task,
-        subtask_type=subtasktype,
-        dataset_path=dataset_id,
-        status='Created',
-        parameters=parameters_dict
-    )
-
-    # 硬编码加载 SubScstquery 模块
+        return Response({'status': 'Failed', 'message': '缺少 parameters'}, status=400)
     try:
-        def get_class_from_module(module, class_name):
-            return getattr(module, class_name, None)
+        parameters_dict = json.loads(parameters_string)
+    except (json.JSONDecodeError, TypeError) as e:
+        return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
-        cls = get_class_from_module(utils.analysis, 'SubScstquery')  # 硬编码类名
-        if cls is None:
-            raise ValueError('SubScstquery 模块未找到')
-
-        # 模块自理目录/文件：传子任务名 + params (含路径)
-        # Resolve dataset dir key (= Dataset.title) from Dataset model
-        dataset_uuid = ''
-        st_h5ad_path = ''
-        if dataset_id:
-            try:
-                ds = Dataset.objects.get(dataset_id=dataset_id)
-                dataset_uuid = ds.title  # 目录键统一用 title(与读侧 _dataset_dir_key 一致)
-                st_h5ad_path = ds.file_path
-            except Dataset.DoesNotExist:
-                pass
-        new_submodule = cls(subtasktype, usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, parameters_dict)  # __init__(name, uuid, marker_path, params)
-
-        # Auto-chain hierarchical_clustering as prerequisite for tools that depend on it
-        needs_hierarchical_clustering = subtasktype == 'recall_analysis'
-        if needs_hierarchical_clustering:
-            # Always re-submit HC on re-run (old file-existence guard removed to allow re-runs)
-            hc_params = parameters_dict.copy()
-            hc_params['sub_type'] = 'hierarchical_clustering'
-            if 'organParts' not in hc_params:
-                hc_params['organParts'] = ''
-            if 'projectname' not in hc_params:
-                hc_params['projectname'] = 'test'
-            hc_module = cls('hierarchical_clustering', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hc_params)
-            hc_job_id = hc_module.process()
-            if hc_job_id:
-                new_submodule.add_dependency(hc_module)
-                # Create HC SubTask record and store in viewer params for tracking
-                hc_subtask = SubTask.objects.create(
-                    main_task=main_task,
-                    subtask_type='hierarchical_clustering',
-                    dataset_path=dataset_id,
-                    status='Running',
-                    job_id=hc_job_id,
-                    parameters=hc_params
-                )
-                parameters_dict['_hc_subtask_id'] = hc_subtask.id
-                parameters_dict['_hc_job_id'] = hc_job_id
-                print(f'Auto-created HC subtask id={hc_subtask.id}, job_id={hc_job_id}')
-
-        # Auto-chain he_scatter as prerequisite for annotation_mapping
-        needs_he_scatter = subtasktype == 'annotation_mapping'
-        if needs_he_scatter:
-            # Always re-submit he_scatter on re-run (old file-existence guard removed to allow re-runs)
-            hs_params = parameters_dict.copy()
-            hs_params['sub_type'] = 'he_scatter'
-            if 'organParts' not in hs_params:
-                hs_params['organParts'] = ''
-            if 'projectname' not in hs_params:
-                hs_params['projectname'] = 'test'
-            hs_module = cls('he_scatter', usertask_dir, dataset_uuid, dataset_path, st_h5ad_path, hs_params)
-            hs_job_id = hs_module.process()
-            if hs_job_id:
-                new_submodule.add_dependency(hs_module)
-                hs_subtask = SubTask.objects.create(
-                    main_task=main_task,
-                    subtask_type='he_scatter',
-                    dataset_path=dataset_id,
-                    status='Running',
-                    job_id=hs_job_id,
-                    parameters=hs_params
-                )
-                parameters_dict['_hs_subtask_id'] = hs_subtask.id
-                parameters_dict['_hs_job_id'] = hs_job_id
-                print(f'Auto-created HE scatter subtask id={hs_subtask.id}, job_id={hs_job_id}')
-
-        # Explicit flow: commot/cellchat/spider require an already-completed SC-ST Mapping
-        # output for the chosen method (user runs SC-ST Mapping first). Reject if missing
-        # instead of auto-chaining a mapping job.
-        if subtasktype in ('commot', 'cellchat', 'spider'):
-            mapping_method = parameters_dict.get('mapping_method', 'cytospace')
-            mapping_base = os.path.join(local_settings.USERTASKPATH, usertask_dir)
-            try:
-                if not check_mapping_completed(mapping_base, dataset_uuid, mapping_method):
-                    res['status'] = 'Failed'
-                    res['message'] = f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."
-                    return Response(res, status=400)
-            except ValueError as e:
-                res['status'] = 'Failed'
-                res['message'] = str(e)
-                return Response(res, status=400)
-
-        job_id = new_submodule.process()
-        print(job_id)
-
-        # 保存状态/文件（用 module 自身的 status，支持 viewer/pending 等非 Running 状态）
-        new_subtask.job_id = job_id
-        new_subtask.status = new_submodule.status if new_submodule.status else 'Running'
-        new_subtask.parameters = parameters_dict
-        new_subtask.save()
-
-        # taskdetailjson = [{'subtasktype': subtasktype, 'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
-        # with open(new_submodule.path + '/taskdetail.json', 'w') as f:
-        #     json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
-        # with open(new_submodule.path + '/moduleobject.pkl', 'wb') as f:
-        #     pickle.dump(new_submodule, f)
-
-        res['status'] = 'Success'
-        res['message'] = '子任务创建成功'
-        res['data'] = {'subtaskid': new_subtask.id, 'sub_dir': new_submodule.path}
-    except Exception as e:
-        res['status'] = 'Failed'
-        res['message'] = f'子任务创建失败：{str(e)}'
-        new_subtask.status = 'Failed'
-        new_subtask.save()
+    try:
+        result = create_subtask_service(main_task, userid, dataset_path, dataset_id, subtasktype, parameters_dict)
+        return Response(result)
+    except ValueError as e:
         traceback.print_exc()
-
-    return Response(res)
+        return Response({'status': 'Failed', 'message': str(e)}, status=400)
+    except Exception as e:
+        traceback.print_exc()
+        return Response({'status': 'Failed', 'message': f'子任务创建失败：{str(e)}'})
 
 # view.py
 @api_view(['GET'])
