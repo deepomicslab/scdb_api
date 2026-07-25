@@ -1,6 +1,8 @@
 from utils import slurm_api
+from utils.slurm_api import normalize_slurm_status
 from scdb_api import settings_local as local_settings
 from utils.mapping_paths import list_completed_methods, resolve_mapping_output_path, check_mapping_completed
+from task.models import TaskStatus, PSEUDO_JOB_IDS
 import pandas as pd
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
@@ -40,7 +42,7 @@ class Module:
         self.job_id = None
         self.dependencies = []
         self.path = local_settings.USERTASKPATH+userpath
-        self.status = 'Created'
+        self.status = TaskStatus.CREATED
         self.shell_script = None
         self.script_arguments = None
 
@@ -152,10 +154,10 @@ class Module:
             return {'status': 'fail', 'message': str(e)}
 
     def check_status(self):
-        # statuslist = ['PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING', 'COMPLETED','CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL']
         if self.job_id is None:
             raise ValueError("Job ID is not set. Cannot check status.")
-        self.status = slurm_api.get_job_status(self.job_id)
+        raw_status = slurm_api.get_job_status(self.job_id)
+        self.status = normalize_slurm_status(raw_status) or self.status
         return self.status
 
     def process(self):
@@ -168,7 +170,7 @@ class Module:
         else:
             dependencies_jobs = [dependency.job_id for dependency in self.dependencies if dependency.job_id is not None]
             self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments,dependency_job_ids=dependencies_jobs)
-        self.status = 'Running'
+        self.status = TaskStatus.RUNNING
         return self.job_id
 
 # class Scquery_old(Module):
@@ -1717,19 +1719,19 @@ class SubScstquery(Module):
     def process(self):
         if self.subtask_type == 'recall_analysis':
             if self.dependencies:
-                self.status = 'Pending'
+                self.status = TaskStatus.PENDING
                 self.job_id = 'pending_hc'
                 return self.job_id
-            self.status = 'Completed'
+            self.status = TaskStatus.COMPLETED
             self.job_id = 'viewer_only'
             return self.job_id
         if self.subtask_type == 'annotation_mapping':
             # routing-only; actual work delegated to he_scatter
             if self.dependencies:
-                self.status = 'Pending'
+                self.status = TaskStatus.PENDING
                 self.job_id = 'pending_he_scatter'
                 return self.job_id
-            self.status = 'Completed'
+            self.status = TaskStatus.COMPLETED
             self.job_id = 'viewer_only'
             return self.job_id
         return super().process()

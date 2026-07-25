@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from task.models import tasks, SubTask
+from task.models import tasks, SubTask, TaskStatus, SLURM_ACTIVE_STATES, PSEUDO_JOB_IDS
 from dataset.models import Dataset
 from task.serializers import taskSerializer
 from rest_framework.views import APIView
@@ -13,6 +13,7 @@ from django.core.files.base import ContentFile
 import time,random,json
 from scdb_api import settings_local as local_settings
 from utils import slurm_api
+from utils.slurm_api import normalize_slurm_status
 from django.http import FileResponse
 import pandas as pd
 import utils.analysis 
@@ -20,6 +21,25 @@ from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 from utils.mapping_paths import check_mapping_completed
 import pickle
+
+
+def _sync_dependency_from_slurm(dep_subtask):
+    """Check SLURM status for a dependency subtask and update its DB status.
+    Used for auto-chained HC/HE prerequisites that aren't directly polled by frontend.
+    """
+    if not dep_subtask:
+        return
+    status_upper = (dep_subtask.status or '').upper()
+    if status_upper not in SLURM_ACTIVE_STATES:
+        return
+    if not dep_subtask.job_id or dep_subtask.job_id in PSEUDO_JOB_IDS:
+        return
+    try:
+        new_status = dep_subtask.sync_from_slurm()
+        if new_status and new_status != dep_subtask.status:
+            dep_subtask.save()
+    except Exception:
+        pass
 
 class taskViewSet(viewsets.ModelViewSet):
     queryset = tasks.objects.order_by('id')
@@ -459,62 +479,44 @@ def create_subtask(request):
 # view.py
 @api_view(['GET'])
 def subtask_status_update(request):
-    # for subtask in SubTask.objects.all().order_by('-id'):
-    #     print(f"ID: {subtask.id}, Main ID: {subtask.main_task.id}, Type: {subtask.subtask_type}, Status: {subtask.status}")
-    # return
     """
     按需获取并更新子任务的实时状态 (不依赖 PKL 文件)。
     参数: subtaskid
     """
     subtaskid = request.query_params.get('subtaskid')
-    NON_FINAL_STATES = ["RUNNING", "PENDING", "CONFIGURING", "COMPLETING", "REQUEUED", "SUSPENDED"]
-    res = {'status': 'Failed', 'message': 'Invalid request.'}
 
     if not subtaskid:
-        res['message'] = '缺少 subtaskid 参数。'
-        return Response(res, status=400)
+        return Response({'status': 'Failed', 'message': '缺少 subtaskid 参数。'}, status=400)
 
     try:
         subtask = SubTask.objects.get(id=subtaskid)
-        current_db_status = subtask.status
-        job_id = subtask.job_id
-
     except SubTask.DoesNotExist:
-        res['message'] = f'ID 为 {subtaskid} 的子任务不存在。'
-        return Response(res, status=404)
+        return Response({'status': 'Failed', 'message': f'ID 为 {subtaskid} 的子任务不存在。'}, status=404)
 
-    # 0. Sync auto-chained HC dependency: commot/cellchat/spider chain HC with a
-    # real SLURM job (dependency_job_ids), so the HC subtask is never frontend-polled
-    # and its DB status would stay 'Running' after the SLURM job finishes. When the
-    # parent is polled, sync the HC too. (recall_analysis covers its own HC via the
-    # pending_hc branch below; this covers the real-job case.) Runs even if the parent
-    # is already final, so a stale HC gets fixed on the next parent poll.
+    current_db_status = subtask.status or ''
+    job_id = subtask.job_id
+    status_upper = current_db_status.upper()
+
+    # 0. Sync auto-chained HC dependency for commot/cellchat/spider
     if subtask.subtask_type in ('commot', 'cellchat', 'spider'):
         hc_subtask_id = (subtask.parameters or {}).get('_hc_subtask_id')
         if hc_subtask_id:
             try:
                 hc = SubTask.objects.get(id=hc_subtask_id)
-                if (hc.status.upper() in NON_FINAL_STATES and hc.job_id
-                        and hc.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc')):
-                    _hc_slurm_status = slurm_api.get_job_status(hc.job_id)
-                    if _hc_slurm_status:
-                        _hc_slurm_status = _hc_slurm_status.rstrip('+').upper()
-                        if _hc_slurm_status != hc.status:
-                            hc.status = _hc_slurm_status
-                            hc.save()
-            except Exception:
+                _sync_dependency_from_slurm(hc)
+            except SubTask.DoesNotExist:
                 pass
 
-    # 1. 如果数据库状态已经是终态，直接返回
-    if current_db_status.upper() not in NON_FINAL_STATES:
+    # 1. Terminal state - return immediately
+    if status_upper not in SLURM_ACTIVE_STATES:
         return Response({
             'status': 'Success',
             'current_status': current_db_status,
             'job_id': job_id
         })
-        
-    # 2. 非 Slurm 作业类型（viewer/跳过），直接返回数据库状态
-    if job_id in ('viewer_only', 'skipped_existing'):
+
+    # 2. Non-slurm pseudo job_ids (viewer/skipped)
+    if job_id in PSEUDO_JOB_IDS and job_id in ('viewer_only', 'skipped_existing'):
         return Response({
             'status': 'Success',
             'current_status': current_db_status,
@@ -529,29 +531,18 @@ def subtask_status_update(request):
             subtask_type='hierarchical_clustering',
             dataset_path=subtask.dataset_path
         ).order_by('-id').first()
-        if hc_subtask:
-            # Update HC status from Slurm if needed
-            if hc_subtask.status.upper() in NON_FINAL_STATES and hc_subtask.job_id and hc_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_hc'):
-                try:
-                    slurm_status = slurm_api.get_job_status(hc_subtask.job_id)
-                    if slurm_status:
-                        slurm_status = slurm_status.rstrip('+').upper()
-                        if slurm_status != hc_subtask.status:
-                            hc_subtask.status = slurm_status
-                            hc_subtask.save()
-                except Exception:
-                    pass
-        if hc_subtask and hc_subtask.status in ('Completed', 'COMPLETED'):
-            subtask.status = 'Completed'
+        _sync_dependency_from_slurm(hc_subtask)
+        if hc_subtask and (hc_subtask.status or '').upper() == 'COMPLETED':
+            subtask.status = TaskStatus.COMPLETED
             subtask.job_id = 'viewer_only'
             subtask.save()
             return Response({
                 'status': 'Success',
-                'current_status': 'Completed',
+                'current_status': TaskStatus.COMPLETED,
                 'job_id': 'viewer_only',
                 'message': 'HC completed, viewer ready.'
             })
-        hc_job = subtask.parameters.get('_hc_job_id', 'unknown')
+        hc_job = (subtask.parameters or {}).get('_hc_job_id', 'unknown')
         return Response({
             'status': 'Success',
             'current_status': 'Pending',
@@ -567,28 +558,18 @@ def subtask_status_update(request):
             subtask_type='he_scatter',
             dataset_path=subtask.dataset_path
         ).order_by('-id').first()
-        if hs_subtask:
-            if hs_subtask.status.upper() in NON_FINAL_STATES and hs_subtask.job_id and hs_subtask.job_id not in ('viewer_only', 'skipped_existing', 'pending_he_scatter'):
-                try:
-                    slurm_status = slurm_api.get_job_status(hs_subtask.job_id)
-                    if slurm_status:
-                        slurm_status = slurm_status.rstrip('+').upper()
-                        if slurm_status != hs_subtask.status:
-                            hs_subtask.status = slurm_status
-                            hs_subtask.save()
-                except Exception:
-                    pass
-        if hs_subtask and hs_subtask.status in ('Completed', 'COMPLETED'):
-            subtask.status = 'Completed'
+        _sync_dependency_from_slurm(hs_subtask)
+        if hs_subtask and (hs_subtask.status or '').upper() == 'COMPLETED':
+            subtask.status = TaskStatus.COMPLETED
             subtask.job_id = 'viewer_only'
             subtask.save()
             return Response({
                 'status': 'Success',
-                'current_status': 'Completed',
+                'current_status': TaskStatus.COMPLETED,
                 'job_id': 'viewer_only',
                 'message': 'HE scatter completed, annotation viewer ready.'
             })
-        hs_job = subtask.parameters.get('_hs_job_id', 'unknown')
+        hs_job = (subtask.parameters or {}).get('_hs_job_id', 'unknown')
         return Response({
             'status': 'Success',
             'current_status': 'Pending',
@@ -597,46 +578,41 @@ def subtask_status_update(request):
             'message': f'Waiting for HE scatter subtask (job {hs_job}) to complete.'
         })
 
-    # 3. 如果 job_id 为空，但状态不是终态，可能是提交失败
+    # 3. job_id is empty but status is non-terminal
     if not job_id:
-        # 如果是这种情况，需要根据您业务定义是返回 Failed 还是 Pending
-        return Response({'status': 'Success', 'current_status': current_db_status, 'message': '任务 Job ID 丢失。'})
+        return Response({
+            'status': 'Success',
+            'current_status': current_db_status,
+            'message': '任务 Job ID 丢失。'
+        })
 
-    # 4. 状态需要更新 (非终态且有 job_id)
+    # 4. Query SLURM and update
     try:
-        # 直接调用 SLURM API 查询实时状态
-        new_slurm_status = slurm_api.get_job_status(job_id)
-        if new_slurm_status:
-            new_slurm_status = new_slurm_status.rstrip("+")
-        
-        # 如果 SLURM API 返回 None 或空字符串，说明任务可能还在处理中，保持当前数据库状态
-        if not new_slurm_status:
-             return Response({
+        raw_status = slurm_api.get_job_status(job_id)
+        if not raw_status:
+            return Response({
                 'status': 'Success',
                 'current_status': current_db_status,
                 'job_id': job_id,
                 'message': 'SLURM 状态暂时无法查询，维持当前状态。'
             })
-             
-        # SLURM 状态通常是大写，保持一致性
-        new_slurm_status = new_slurm_status.upper() 
 
-        # 4. 更新数据库
-        if new_slurm_status != current_db_status:
-            subtask.status = new_slurm_status
+        new_status = normalize_slurm_status(raw_status)
+
+        if new_status != current_db_status:
+            subtask.status = new_status
             subtask.save()
-        
+
         return Response({
             'status': 'Success',
-            'current_status': new_slurm_status,
+            'current_status': new_status,
             'job_id': job_id,
-            'message': f'状态已更新至 {new_slurm_status}'
+            'message': f'状态已更新至 {new_status}'
         })
 
     except Exception as e:
         traceback.print_exc()
-        res['message'] = f'SLURM 状态查询失败: {str(e)}'
-        return Response(res, status=500)
+        return Response({'status': 'Failed', 'message': f'SLURM 状态查询失败: {str(e)}'}, status=500)
 @api_view(['GET'])
 def subtask_log(request):
     """Return the last 500 lines of a subtask's SLURM log file."""
@@ -652,7 +628,7 @@ def subtask_log(request):
     subtask_type = subtask.subtask_type
     params = subtask.parameters if isinstance(subtask.parameters, dict) else {}
 
-    if not job_id or job_id in ('viewer_only', 'skipped_existing', 'pending_hc', 'pending_he_scatter'):
+    if not job_id or job_id in PSEUDO_JOB_IDS:
         return Response({'status': 'Failed', 'message': f'No SLURM log for job_id={job_id}.'}, status=400)
 
     mapping_method = params.get('mapping_method') if subtask_type == 'scst_mapping' else None

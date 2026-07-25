@@ -1,9 +1,36 @@
 import subprocess
-from scdb_api import settings_local as local_settings
 import re
 import sys
-# statuslist = ['PENDING', 'RUNNING', 'SUSPENDED', 'COMPLETING', 'COMPLETED',
-#               'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL']
+
+
+# Mapping from raw SLURM status to normalized TaskStatus values
+_SLURM_STATUS_MAP = {
+    'COMPLETED': 'Completed',
+    'PENDING': 'Pending',
+    'RUNNING': 'Running',
+    'CONFIGURING': 'Running',
+    'COMPLETING': 'Running',
+    'REQUEUED': 'Pending',
+    'SUSPENDED': 'Pending',
+    'CANCELLED': 'Failed',
+    'FAILED': 'Failed',
+    'TIMEOUT': 'Failed',
+    'NODE_FAIL': 'Failed',
+    'PREEMPTED': 'Failed',
+    'BOOT_FAIL': 'Failed',
+    'OUT_OF_MEMORY': 'Failed',
+}
+
+
+def normalize_slurm_status(slurm_status):
+    """Map raw SLURM status string to normalized TaskStatus value.
+    Returns None if input is empty/None.
+    Returns 'Error' for unrecognized statuses.
+    """
+    if not slurm_status:
+        return None
+    s = slurm_status.rstrip('+').upper()
+    return _SLURM_STATUS_MAP.get(s, 'Error')
 
 
 def get_job_status(job_id):
@@ -20,7 +47,6 @@ def get_job_status(job_id):
     sacct_command = ["sacct", "--jobs",
                     str(job_id), "--format=JobID,State"]
     try:
-        print(sacct_command)
         sacct_output = subprocess.check_output(sacct_command).decode("utf-8")
     except subprocess.CalledProcessError as e:
         print("sacct check error:", e, file=sys.stderr)
