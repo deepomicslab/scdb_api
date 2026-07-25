@@ -1,7 +1,7 @@
 from task.serializers import taskSerializer
 from django.core.management.base import BaseCommand, CommandError
 from task.models import tasks, TaskStatus
-from utils.slurm_api import normalize_slurm_status
+from utils.slurm_api import normalize_slurm_status, get_job_status as slurm_get_job_status
 import datetime, pickle, json, os
 from scdb_api import settings_local as local_settings
 
@@ -24,23 +24,34 @@ class Command(BaseCommand):
                     continue
 
                 base_path = os.path.join(local_settings.USERTASKPATH, task.userpath)
-                objectpath = os.path.join(base_path, 'moduleobject.pkl')
                 jsonpath = os.path.join(base_path, 'taskdetail.json')
+                pklpath = os.path.join(base_path, 'moduleobject.pkl')
 
-                if not os.path.exists(objectpath):
-                    task_id = task.id
-                    task.delete()
-                    self.stdout.write(self.style.WARNING(f'Pickle file not found for task {task_id}, deleted from DB'))
-                    continue
+                job_id = None
+                try:
+                    with open(jsonpath, 'r') as f:
+                        jsondata = json.load(f)
+                    detail = jsondata[0] if isinstance(jsondata, list) else jsondata
+                    job_id = detail.get('job_id')
+                except Exception:
+                    pass
 
-                with open(objectpath, 'rb') as f:
-                    taskobject = pickle.load(f)
+                if not job_id:
+                    if os.path.exists(pklpath):
+                        with open(pklpath, 'rb') as f:
+                            taskobject = pickle.load(f)
+                        job_id = taskobject.job_id
+                    else:
+                        task_id = task.id
+                        task.delete()
+                        self.stdout.write(self.style.WARNING(f'Metadata not found for task {task_id}, deleted from DB'))
+                        continue
 
-                current_slurm_status = taskobject.check_status()
+                raw_status = slurm_get_job_status(job_id)
+                current_slurm_status = normalize_slurm_status(raw_status)
 
                 if current_slurm_status and current_slurm_status.upper() in SLURM_TERMINAL_STATUSES:
-                    normalized = normalize_slurm_status(current_slurm_status)
-                    task.status = normalized or TaskStatus.ERROR
+                    task.status = current_slurm_status or TaskStatus.ERROR
                     task.save()
 
                     if os.path.exists(jsonpath):
@@ -50,9 +61,6 @@ class Command(BaseCommand):
                             jsondata[0]['status'] = task.status
                             with open(jsonpath, 'w') as f:
                                 json.dump(jsondata, f, ensure_ascii=False, indent=4)
-
-                    with open(objectpath, 'wb') as f:
-                        pickle.dump(taskobject, f)
 
                     self.stdout.write(self.style.SUCCESS(f'Task {task.id} updated to {task.status}'))
 

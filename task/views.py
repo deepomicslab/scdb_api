@@ -127,8 +127,6 @@ def createtask(request):
                 taskdetailjson=[{'modulename':request.data['modulename'],'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
                 with open(userpath+'/'+'taskdetail.json', 'w') as f:
                     json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
-                with open(userpath+'/moduleobject.pkl', 'wb') as f:
-                    pickle.dump(newmodule, f)
                 newtask.status = TaskStatus.RUNNING
                 res['status'] = 'Success'
                 res['message'] = 'task create successfully'
@@ -196,20 +194,37 @@ def taskresultview(request):
         return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
     if 'testmode' in query_params and query_params['testmode'] == 'true':
         print("testmode")
-        objectpath = local_settings.USERTASKPATH + 'demo_result/scst/moduleobject.pkl'
-        with open(objectpath, 'rb') as f:
-            #载入模块对象
-            module = pickle.load(f)
+        from utils.analysis import Scstquery
+        module = Scstquery.__new__(Scstquery)
         res = module.gettestresult(query_params)
         return Response(res)
     try:
         taskobject = tasks.objects.get(id=taskid)
     except tasks.DoesNotExist:
         return Response({'status': 'error', 'message': 'Task not found'}, status=404)
-    objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
-    with open(objectpath, 'rb') as f:
-        #载入模块对象
-        module = pickle.load(f)
+
+    module = None
+    jsonpath = local_settings.USERTASKPATH + taskobject.userpath + '/taskdetail.json'
+    try:
+        with open(jsonpath, 'r') as f:
+            taskdetail = json.load(f)
+        detail = taskdetail[0] if isinstance(taskdetail, list) else taskdetail
+        modulename = detail.get('modulename')
+        params = detail.get('parameters_dict', {})
+        cls = get_module_class(modulename)
+        if cls:
+            module = cls(taskobject.name, taskobject.userpath, params)
+    except Exception:
+        pass
+
+    if module is None:
+        objectpath = local_settings.USERTASKPATH + taskobject.userpath + '/moduleobject.pkl'
+        if os.path.exists(objectpath):
+            with open(objectpath, 'rb') as f:
+                module = pickle.load(f)
+        else:
+            return Response({'status': 'error', 'message': 'Task metadata not found'}, status=404)
+
     res=module.getresult(query_params)
     # scstmappingDownload returns a {'_stream_file': path, 'filename': ...} marker ->
     # stream the h5ad as a FileResponse instead of base64-encoding it into a JSON body
