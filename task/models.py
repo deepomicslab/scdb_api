@@ -37,6 +37,9 @@ class tasks(models.Model):
         db_table = 'tasks'
         verbose_name = 'tasks'
         verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=['user'], name='idx_tasks_user'),
+        ]
 
     def __str__(self):
         return self.name
@@ -55,6 +58,9 @@ class SubTask(models.Model):
         verbose_name = 'SubTask'
         verbose_name_plural = verbose_name
         ordering = ['id']
+        indexes = [
+            models.Index(fields=['main_task', 'subtask_type', 'dataset_path'], name='idx_subtask_lookup'),
+        ]
 
     def __str__(self):
         return f"{self.main_task.name} - {self.dataset_path} - {self.subtask_type} ({self.status})"

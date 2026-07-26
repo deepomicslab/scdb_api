@@ -1,13 +1,13 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.http import FileResponse # <--- 记得加这个引用
-from django.db.models import Count
+from django.http import FileResponse
+from django.db.models import Count, Sum, Q
 import os
+import time
 import pandas as pd
 from collections import Counter
 import scanpy as sc
 
-# 引入你的模型
 from .models import Dataset, GlobalStat
 
 # ================================
@@ -36,39 +36,32 @@ def global_stats(request):
     return Response({'status': 'success', 'data': data})
 
 # ================================
-# 2. 器官统计 (Organ List & Charts) - 快
+# 2. 器官统计 (Organ List & Charts) - SQL 聚合
 # ================================
 @api_view(['GET'])
 def organ_stats(request):
-    """
-    返回按器官分组的统计数据，用于左侧列表和柱状图
-    """
-    # 获取计算所需字段
-    qs = Dataset.objects.all().values('organ', 'disease', 'n_spots', 'n_donors')
-    df = pd.DataFrame(list(qs))
+    rows = (
+        Dataset.objects
+        .values('organ')
+        .annotate(
+            datasets=Count('id'),
+            spots=Sum('n_spots'),
+            donors=Sum('n_donors'),
+            normal_donors=Sum('n_donors', filter=Q(disease='Normal')),
+            disease_donors=Sum('n_donors', filter=~Q(disease='Normal')),
+        )
+        .order_by('organ')
+    )
 
-    if df.empty:
-        return Response({'status': 'success', 'data': {}})
-
-    # 数据清洗
-    df['organ'] = df['organ'].fillna('Unknown')
-    df['n_spots'] = df['n_spots'].fillna(0).astype(int)
-    df['n_donors'] = df['n_donors'].fillna(0).astype(int)
-    
-    # 标记 Normal
-    df['is_normal'] = df['disease'] == 'Normal'
-    
     agg_result = {}
-    
-    # Pandas 分组计算
-    for organ, group in df.groupby('organ'):
+    for row in rows:
+        organ = row['organ'] or 'Unknown'
         agg_result[organ] = {
-            'datasets': len(group),
-            'spots': int(group['n_spots'].sum()),
-            'donors': int(group['n_donors'].sum()),
-            # 计算 Normal 和 Disease 的 donor 分布
-            'normal_donors': int(group[group['is_normal']]['n_donors'].sum()),
-            'disease_donors': int(group[~group['is_normal']]['n_donors'].sum())
+            'datasets': row['datasets'],
+            'spots': row['spots'] or 0,
+            'donors': row['donors'] or 0,
+            'normal_donors': row['normal_donors'] or 0,
+            'disease_donors': row['disease_donors'] or 0,
         }
 
     return Response({'status': 'success', 'data': agg_result})
@@ -98,30 +91,43 @@ def dataset_list(request):
     return Response({'status': 'success', 'data': list(datasets)})
 
 # ================================
-# 4. 细胞类型统计 (饼图) - 保持不变
+# 4. 细胞类型统计 (饼图) - 带缓存
 # ================================
+_celltype_cache = {}
+_celltype_cache_time = {}
+_CELLTYPE_CACHE_TTL = 60
+
+
 @api_view(['GET'])
 def celltype_stats(request):
-    target_organ = request.GET.get('organ', 'All')
-    
-    if target_organ and target_organ != 'All':
-        datasets = Dataset.objects.filter(organ__iexact=target_organ)
+    target_organ = request.GET.get('organ', 'All') or 'All'
+    cache_key = target_organ.lower()
+
+    now = time.time()
+    if cache_key in _celltype_cache and (now - _celltype_cache_time.get(cache_key, 0)) < _CELLTYPE_CACHE_TTL:
+        return Response({'status': 'success', 'data': _celltype_cache[cache_key]})
+
+    if target_organ != 'All':
+        counts_list = Dataset.objects.filter(organ__iexact=target_organ).values_list('cell_type_counts', flat=True)
     else:
-        datasets = Dataset.objects.all()
+        counts_list = Dataset.objects.values_list('cell_type_counts', flat=True)
 
     global_counter = Counter()
-    for ds in datasets:
-        if ds.cell_type_counts:
-            global_counter.update(ds.cell_type_counts)
-            
+    for counts in counts_list:
+        if counts:
+            global_counter.update(counts)
+
     result_list = [{'name': k, 'value': v} for k, v in global_counter.items()]
     result_list.sort(key=lambda x: x['value'], reverse=True)
-    
+
     if len(result_list) > 10:
         top_10 = result_list[:10]
         others_count = sum(item['value'] for item in result_list[10:])
         top_10.append({'name': 'Others', 'value': others_count})
         result_list = top_10
+
+    _celltype_cache[cache_key] = result_list
+    _celltype_cache_time[cache_key] = now
 
     return Response({'status': 'success', 'data': result_list})
 

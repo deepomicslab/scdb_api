@@ -58,6 +58,11 @@ class Dataset(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['organ'], name='idx_dataset_organ'),
+        ]
+
     def save(self, *args, update_metadata=False, **kwargs):
         """Save the dataset. By default does NOT read the h5ad file.
         Pass update_metadata=True to extract n_spots/donors/cell_type_counts from h5ad.
