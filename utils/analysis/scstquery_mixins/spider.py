@@ -27,7 +27,7 @@ class SpiderMixin:
                     sf_path = f'uns/spatial/{lib}/scalefactors/tissue_hires_scalef'
                     if sf_path in f:
                         val = f[sf_path][()]
-                        return float(val[0]) if hasattr(val, '__len__') else float(val)
+                        return float(val)
         except Exception as e:
             print(f'[_read_tissue_hires_scalef_spider] error: {e}')
         return None
