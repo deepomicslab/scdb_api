@@ -168,15 +168,28 @@ def detail_scatter(request, dataset_id):
         adata = sc.read_h5ad(file_path, backed='r')
         
         coords = None
+        coord_type = 'spatial'
         if 'spatial' in adata.obsm.keys():
             coords = adata.obsm['spatial']
         elif 'X_spatial' in adata.obsm.keys():
             coords = adata.obsm['X_spatial']
         elif 'X_umap' in adata.obsm.keys():
             coords = adata.obsm['X_umap']
+            coord_type = 'umap'
             
         if coords is None:
             return Response({'status': 'error', 'message': 'No coordinates found'}, status=500)
+
+        tissue_hires_scalef = 1.0
+        spot_diameter_fullres = 50.0
+        if coord_type == 'spatial' and 'spatial' in adata.uns:
+            try:
+                lib = next(iter(adata.uns['spatial'].keys()))
+                sf = adata.uns['spatial'][lib].get('scalefactors', {})
+                tissue_hires_scalef = float(sf.get('tissue_hires_scalef', 1.0))
+                spot_diameter_fullres = float(sf.get('spot_diameter_fullres', 50.0))
+            except Exception:
+                pass
 
         target_cols = ['cell_type', 'annotation', 'Label', 'donor', 'donor_id', 'tissue']
         available_cols = [c for c in target_cols if c in adata.obs.columns]
@@ -207,7 +220,13 @@ def detail_scatter(request, dataset_id):
                 **{k: str(v) for k,v in meta.items()} 
             }
 
-        return Response({'status': 'success', 'data': data_dict})
+        return Response({
+            'status': 'success',
+            'data': data_dict,
+            'coord_type': coord_type,
+            'tissue_hires_scalef': tissue_hires_scalef,
+            'spot_diameter_fullres': spot_diameter_fullres,
+        })
 
     except Exception as e:
         print(e)
