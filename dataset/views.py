@@ -4,6 +4,7 @@ from django.http import FileResponse
 from django.db.models import Count, Sum, Q
 import os
 import time
+import numpy as np
 import pandas as pd
 from collections import Counter
 import scanpy as sc
@@ -154,14 +155,34 @@ def detail_info(request, dataset_id):
         return Response({'status': 'error', 'message': 'Dataset not found'}, status=404)
 
 # ================================
-# 6. 详情页 Scatter (保持不变)
+# 6. 详情页 Scatter (向量化 + 长 TTL 缓存)
 # ================================
+_scatter_cache = {}
+_SCATTER_CACHE_TTL = 3600
+
+
+def _scatter_first_truthy(df, cols):
+    s = None
+    for c in cols:
+        if c in df.columns:
+            v = df[c].replace('', np.nan)
+            s = v if s is None else s.fillna(v)
+    if s is None:
+        return pd.Series('Unknown', index=df.index)
+    return s.fillna('Unknown')
+
+
 @api_view(['GET'])
 def detail_scatter(request, dataset_id):
     try:
+        now = time.time()
+        cached = _scatter_cache.get(dataset_id)
+        if cached and cached[1] > now:
+            return Response(cached[0])
+
         ds = Dataset.objects.get(dataset_id=dataset_id)
         file_path = ds.file_path
-        
+
         if not os.path.exists(file_path):
             return Response({'status': 'error', 'message': 'File not found'}, status=404)
 
@@ -194,39 +215,44 @@ def detail_scatter(request, dataset_id):
         target_cols = ['cell_type', 'annotation', 'Label', 'donor', 'donor_id', 'tissue']
         available_cols = [c for c in target_cols if c in adata.obs.columns]
         df = adata.obs[available_cols].copy()
-        
+
         for col in df.columns:
             if pd.api.types.is_categorical_dtype(df[col]):
                 df[col] = df[col].astype(str)
             df[col] = df[col].fillna('Unknown')
+        if available_cols:
+            df[available_cols] = df[available_cols].astype(str)
 
-        data_dict = {}
-        if hasattr(coords, "to_numpy"):
+        if hasattr(coords, 'to_numpy'):
             coords = coords.to_numpy()
-            
-        indices = adata.obs.index
-        # 如果点太多，建议在这里切片，例如 [:10000]
-        
-        for i, idx in enumerate(indices):
-            meta = df.iloc[i].to_dict()
-            label_val = meta.get('cell_type') or meta.get('annotation') or meta.get('Label') or 'Unknown'
-            donor_val = meta.get('donor_id') or meta.get('donor') or 'Unknown'
-            
-            data_dict[str(idx)] = {
-                'x': float(coords[i][0]),
-                'y': float(coords[i][1]),
-                'Label': str(label_val), 
-                'donor': str(donor_val),
-                **{k: str(v) for k,v in meta.items()} 
-            }
+        coords = np.asarray(coords)
 
-        return Response({
+        if 'Label' in df.columns:
+            label_series = df['Label']
+        else:
+            label_series = _scatter_first_truthy(df, ['cell_type', 'annotation', 'Label'])
+        if 'donor' in df.columns:
+            donor_series = df['donor']
+        else:
+            donor_series = _scatter_first_truthy(df, ['donor_id', 'donor'])
+
+        df['x'] = coords[:, 0].astype(float)
+        df['y'] = coords[:, 1].astype(float)
+        df['Label'] = label_series
+        df['donor'] = donor_series
+        df.index = df.index.astype(str)
+
+        data_dict = df.to_dict(orient='index')
+
+        body = {
             'status': 'success',
             'data': data_dict,
             'coord_type': coord_type,
             'tissue_hires_scalef': tissue_hires_scalef,
             'spot_diameter_fullres': spot_diameter_fullres,
-        })
+        }
+        _scatter_cache[dataset_id] = (body, time.time() + _SCATTER_CACHE_TTL)
+        return Response(body)
 
     except Exception as e:
         print(e)
