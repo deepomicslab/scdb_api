@@ -25,7 +25,7 @@ class CommonMixin:
         except Exception as e:
              return {'status': 'fail', 'message': str(e)}
 
-        INTERACTION_TYPES = {'commot', 'cellchat', 'spider'}
+        INTERACTION_TYPES = {'commot', 'cellchat', 'spider', 'scst_mapping'}
         subtask_map = {}
         try:
             from task.models import SubTask, tasks as task_model
