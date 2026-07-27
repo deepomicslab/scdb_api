@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 from dataset.models import Dataset
+from utils.spatial_calibration import read_spatial_calibration
 
 
 class HEScatterMixin:
@@ -37,7 +38,8 @@ class HEScatterMixin:
         if os.path.exists(cluster_celltype_distribution_filepath):
             with open(cluster_celltype_distribution_filepath, 'r') as json_file:
                 cluster_celltype_distribution_data = json.load(json_file)
-        res = {'scatter': query_count_result.to_dict(orient='index'), 'cluster_celltype_distribution': cluster_celltype_distribution_data, 'status': 'success'}
+        scalef, spot = read_spatial_calibration(result)
+        res = {'scatter': query_count_result.to_dict(orient='index'), 'cluster_celltype_distribution': cluster_celltype_distribution_data, 'status': 'success', 'tissue_hires_scalef': scalef, 'spot_diameter_fullres': spot}
         return res
     
     def getQueryCountHeatmapResult(self, dataset):
@@ -51,5 +53,6 @@ class HEScatterMixin:
             query_count_result = query_count_result.drop(columns=['clusters'])
         query_count_result['Label'] = query_count_result['Label'].astype(str)
         query_count_result = query_count_result.replace({np.nan: None})
-        res = {'scatter': query_count_result.to_dict(orient='index'), 'status': 'success'}
+        scalef, spot = read_spatial_calibration(dataset)
+        res = {'scatter': query_count_result.to_dict(orient='index'), 'status': 'success', 'tissue_hires_scalef': scalef, 'spot_diameter_fullres': spot}
         return res

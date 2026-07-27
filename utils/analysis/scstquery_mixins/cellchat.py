@@ -5,6 +5,7 @@ import time
 import subprocess
 from dataset.models import Dataset
 from task.apps import r_proxy
+from utils.spatial_calibration import read_spatial_calibration
 
 
 class CellChatMixin:
@@ -99,49 +100,30 @@ class CellChatMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def _read_tissue_hires_scalef(self, dataset):
-        """从原始 h5ad 的 uns/spatial 读 tissue_hires_scalef（fullres->hires 缩放因子）"""
-        try:
-            db_obj = Dataset.objects.get(dataset_id=dataset)
-        except Dataset.DoesNotExist:
-            return None
-        if not db_obj.file_path or not os.path.exists(db_obj.file_path):
-            return None
-        try:
-            import h5py
-            with h5py.File(db_obj.file_path, 'r') as f:
-                uns_spatial = f.get('uns/spatial')
-                if not uns_spatial:
-                    return None
-                for lib in uns_spatial.keys():
-                    sf_path = f'uns/spatial/{lib}/scalefactors/tissue_hires_scalef'
-                    if sf_path in f:
-                        val = f[sf_path][()]
-                        return float(val)
-        except Exception as e:
-            print(f'[_read_tissue_hires_scalef] error: {e}')
-        return None
-
     def getCellChatSpatialData(self, pathway, dataset=None, mapping_method=None):
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
+        scalef, spot = read_spatial_calibration(dataset)
         try:
             data = r_proxy.get_spatial(rds_path, signaling=pathway)
             # R 端 CellChat 返回的 background_spots 坐标是 fullres 像素，
             # 而 getImg 返回的 H&E 底图是 hires 缩略图，需乘 tissue_hires_scalef 对齐
-            if data and isinstance(data, dict) and 'background_spots' in data and dataset:
-                scalef = self._read_tissue_hires_scalef(dataset)
-                if scalef and scalef != 1.0:
-                    spots = data['background_spots']
-                    if isinstance(spots, dict):
-                        for spot_id, spot in spots.items():
-                            if isinstance(spot, dict) and 'x' in spot and 'y' in spot:
-                                spot['x'] = float(spot['x']) * scalef
-                                spot['y'] = float(spot['y']) * scalef
-            return {'data': data, 'status': 'success'}
+            if data and isinstance(data, dict) and 'background_spots' in data and scalef and scalef != 1.0:
+                spots = data['background_spots']
+                if isinstance(spots, dict):
+                    for spot_id, s in spots.items():
+                        if isinstance(s, dict) and 'x' in s and 'y' in s:
+                            s['x'] = float(s['x']) * scalef
+                            s['y'] = float(s['y']) * scalef
+            return {
+                'data': data,
+                'status': 'success',
+                'tissue_hires_scalef': scalef,
+                'spot_diameter_fullres': spot,
+            }
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
@@ -151,9 +133,15 @@ class CellChatMixin:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
+        scalef, spot = read_spatial_calibration(dataset)
         try:
             data = r_proxy.get_heatmap(rds_path, lrpair=LR_pair)
-            return {'data': data, 'status': 'success'}
+            return {
+                'data': data,
+                'status': 'success',
+                'tissue_hires_scalef': scalef,
+                'spot_diameter_fullres': spot,
+            }
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 

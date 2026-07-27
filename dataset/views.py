@@ -201,14 +201,16 @@ def detail_scatter(request, dataset_id):
         if coords is None:
             return Response({'status': 'error', 'message': 'No coordinates found'}, status=500)
 
-        tissue_hires_scalef = 1.0
-        spot_diameter_fullres = 50.0
+        tissue_hires_scalef = None
+        spot_diameter_fullres = None
         if coord_type == 'spatial' and 'spatial' in adata.uns:
             try:
                 lib = next(iter(adata.uns['spatial'].keys()))
                 sf = adata.uns['spatial'][lib].get('scalefactors', {})
-                tissue_hires_scalef = float(sf.get('tissue_hires_scalef', 1.0))
-                spot_diameter_fullres = float(sf.get('spot_diameter_fullres', 50.0))
+                if 'tissue_hires_scalef' in sf:
+                    tissue_hires_scalef = float(sf['tissue_hires_scalef'])
+                if 'spot_diameter_fullres' in sf:
+                    spot_diameter_fullres = float(sf['spot_diameter_fullres'])
             except Exception:
                 pass
 

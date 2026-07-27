@@ -4,33 +4,11 @@ import pandas as pd
 import scanpy as sc
 from scipy import sparse
 from dataset.models import Dataset
+from utils.spatial_calibration import read_spatial_calibration
 
 
 class SpiderMixin:
     """SPIDER spatial interaction result methods for Scstquery."""
-
-    def _read_tissue_hires_scalef_spider(self, dataset):
-        """从原始 h5ad 的 uns/spatial 读 tissue_hires_scalef"""
-        try:
-            ds = Dataset.objects.get(dataset_id=dataset)
-        except Dataset.DoesNotExist:
-            return None
-        if not ds.file_path or not os.path.exists(ds.file_path):
-            return None
-        try:
-            import h5py
-            with h5py.File(ds.file_path, 'r') as f:
-                uns_spatial = f.get('uns/spatial')
-                if not uns_spatial:
-                    return None
-                for lib in uns_spatial.keys():
-                    sf_path = f'uns/spatial/{lib}/scalefactors/tissue_hires_scalef'
-                    if sf_path in f:
-                        val = f[sf_path][()]
-                        return float(val)
-        except Exception as e:
-            print(f'[_read_tissue_hires_scalef_spider] error: {e}')
-        return None
 
     def _find_spider_h5ad(self, dataset_id, mapping_method=None):
         if dataset_id:
@@ -94,9 +72,7 @@ class SpiderMixin:
             # 优先用 obsm['spatial']（像素坐标，可与 H&E 底图对齐），
             # 没有 obsm['spatial'] 才退回 obs['row'/'col']（网格行列号，无法对齐底图）
             coordinates = []
-            scalef = None
-            if dataset:
-                scalef = self._read_tissue_hires_scalef_spider(dataset)
+            scalef, spot = read_spatial_calibration(dataset)
 
             if 'spatial' in adata.obsm.keys():
                 coords = adata.obsm['spatial']
@@ -121,7 +97,9 @@ class SpiderMixin:
             return {
                 'data': {
                     'metadata': metadata,
-                    'coordinates': coordinates
+                    'coordinates': coordinates,
+                    'tissue_hires_scalef': scalef,
+                    'spot_diameter_fullres': spot,
                 },
                 'status': 'success'
             }
