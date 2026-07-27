@@ -71,7 +71,7 @@ class CommotMixin:
             'x': spatial_coords[:, 0],
             'y': spatial_coords[:, 1],
             lr_pair: receiver_strength
-        })
+        }, index=adata.obs_names)  # 显式用 barcode 作 key，与 countHeatmap CSV 第一列一致
         res = {'receiver_strength': df.to_dict(orient='index'), 'status': 'success'}
         return res
     
