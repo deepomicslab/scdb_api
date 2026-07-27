@@ -9,6 +9,29 @@ from dataset.models import Dataset
 class SpiderMixin:
     """SPIDER spatial interaction result methods for Scstquery."""
 
+    def _read_tissue_hires_scalef_spider(self, dataset):
+        """从原始 h5ad 的 uns/spatial 读 tissue_hires_scalef"""
+        try:
+            ds = Dataset.objects.get(dataset_id=dataset)
+        except Dataset.DoesNotExist:
+            return None
+        if not ds.file_path or not os.path.exists(ds.file_path):
+            return None
+        try:
+            import h5py
+            with h5py.File(ds.file_path, 'r') as f:
+                uns_spatial = f.get('uns/spatial')
+                if not uns_spatial:
+                    return None
+                for lib in uns_spatial.keys():
+                    sf_path = f'uns/spatial/{lib}/scalefactors/tissue_hires_scalef'
+                    if sf_path in f:
+                        val = f[sf_path][()]
+                        return float(val[0]) if hasattr(val, '__len__') else float(val)
+        except Exception as e:
+            print(f'[_read_tissue_hires_scalef_spider] error: {e}')
+        return None
+
     def _find_spider_h5ad(self, dataset_id, mapping_method=None):
         if dataset_id:
             try:
@@ -68,14 +91,30 @@ class SpiderMixin:
                     metadata.append(pattern_item)
             
             # --- 2. 构建坐标 (Coordinates) ---
+            # 优先用 obsm['spatial']（像素坐标，可与 H&E 底图对齐），
+            # 没有 obsm['spatial'] 才退回 obs['row'/'col']（网格行列号，无法对齐底图）
             coordinates = []
-            if 'row' in adata.obs.columns and 'col' in adata.obs.columns:
+            scalef = None
+            if dataset:
+                scalef = self._read_tissue_hires_scalef_spider(dataset)
+
+            if 'spatial' in adata.obsm.keys():
+                coords = adata.obsm['spatial']
+                obs_names = adata.obs_names
+                if hasattr(coords, 'to_numpy'):
+                    coords = coords.to_numpy()
+                coordinates = [
+                    {"id": name, "x": float(coords[i][0]) * (scalef or 1.0),
+                     "y": float(coords[i][1]) * (scalef or 1.0)}
+                    for i, name in enumerate(obs_names)
+                ]
+            elif 'row' in adata.obs.columns and 'col' in adata.obs.columns:
                 rows = adata.obs['row'].values
                 cols = adata.obs['col'].values
                 obs_names = adata.obs_names
-                
+
                 coordinates = [
-                    {"id": name, "x": float(r), "y": float(c)} 
+                    {"id": name, "x": float(r), "y": float(c)}
                     for name, r, c in zip(obs_names, rows, cols)
                 ]
 
