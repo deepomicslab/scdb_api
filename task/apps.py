@@ -53,9 +53,9 @@ class TaskConfig(AppConfig):
                 # stderr=sys.stderr
             )
         
-        # 2. ⏳【关键修改】循环等待 Socket 文件生成 (最多等 20 秒)
+        # 2. ⏳【关键修改】循环等待 Socket 文件生成 (最多等 60 秒)
         print("⏳ 等待 R 服务就绪...", end='', flush=True)
-        max_retries = 40  # 40次 * 0.5秒 = 20秒超时
+        max_retries = 120  # 120次 * 0.5秒 = 60秒超时（r_worker source CellChat 约需 30-40s）
         connected = False
         
         for i in range(max_retries):
@@ -67,7 +67,7 @@ class TaskConfig(AppConfig):
             print(".", end='', flush=True)
         
         if not connected:
-            print("\n❌ [Timeout] R 服务启动超时 (超过20秒)，Socket 文件未生成。")
+            print("\n❌ [Timeout] R 服务启动超时 (超过60秒)，Socket 文件未生成。")
             # 这里不抛异常，避免 Django 启动失败，但由你自己决定
             return
 

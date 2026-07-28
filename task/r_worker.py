@@ -1,6 +1,8 @@
 # task/r_worker.py
 import sys
 import os
+import time
+import threading
 from multiprocessing.managers import BaseManager
 
 # 1. 确保能导入当前目录的模块
@@ -29,7 +31,21 @@ def start_worker(socket_path, auth_key):
     # 绑定 Unix Domain Socket
     manager = RServiceManager(address=socket_path, authkey=auth_key)
     server = manager.get_server()
-    
+
+    # 父进程死亡看门狗：Django 退出时（含 Ctrl+C/SIGKILL），r_worker 自动清理 socket 并退出
+    parent_pid = os.getppid()
+    def _watchdog():
+        while True:
+            if os.getppid() != parent_pid:
+                print("🛑 [R-Worker] 父进程(Django)已退出，清理 socket 并终止。")
+                try:
+                    os.remove(socket_path)
+                except OSError:
+                    pass
+                os._exit(0)
+            time.sleep(1)
+    threading.Thread(target=_watchdog, daemon=True).start()
+
     print("✅ [R-Worker] 服务已就绪，等待 Django 连接...")
     server.serve_forever()
 
