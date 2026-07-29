@@ -17,6 +17,7 @@ SLURM_LOG_PATHS = {
     ('commot', None):              '/data3/platform/sc_db/commot/logs/commot_{job_id}.out',
     ('cellchat', None):            '/data3/platform/sc_db/cellchat/logs/cellchat_{job_id}.out',
     ('spider', None):              '/data3/platform/sc_db/spider/logs/spider_{job_id}.out',
+    ('alphatalk', None):           '/data3/platform/sc_db/AlphaTalk/logs/alphatalk_{job_id}.out',
     ('he_scatter', None):          '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/he_scatter_{job_id}.out',
     ('hierarchical_clustering', None): '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/hc_{job_id}.out',
 }

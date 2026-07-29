@@ -39,7 +39,7 @@ PREREQUISITE_CHAIN = {
 }
 
 # Subtask types that require a completed SC-ST Mapping before they can run
-MAPPING_DEPENDENT_TYPES = ('commot', 'cellchat', 'spider')
+MAPPING_DEPENDENT_TYPES = ('commot', 'cellchat', 'spider', 'alphatalk')
 
 
 def get_module_class(module_name):

@@ -1,19 +1,32 @@
 import os
 import pickle
 import pandas as pd
+from dataset.models import Dataset
 
 
 class AlphaTalkMixin:
     """AlphaTalk cell-cell interaction result methods for Scstquery."""
+
+    def _find_alphatalk_pkl(self, dataset=None):
+        if getattr(self, '_is_demo', False):
+            return os.path.join(self.path, 'result/alphatalk/cci_result.pkl')
+        if not dataset:
+            return None
+        try:
+            db_obj = Dataset.objects.get(dataset_id=dataset)
+        except Dataset.DoesNotExist:
+            return None
+        base = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_alphatalk', 'result')
+        return os.path.join(base, 'alphatalk', 'cci_result.pkl')
 
     def getAlphaTalkLRPairs(self, page=1, pageSize=15, 
                             sender=None, receiver=None, ligand=None, receptor=None, type_col=None,
                             min_score=None, max_score=None,
                             min_lr_score=None, max_lr_score=None,
                             min_p_value=None, max_p_value=None,
-                            sortBy=None, order=None, get_metadata=None):
+                            sortBy=None, order=None, get_metadata=None, dataset=None):
         
-        pkl_path = os.path.join(self.path, 'result/alphatalk/cci_result.pkl')
+        pkl_path = self._find_alphatalk_pkl(dataset)
 
         try:
             if not os.path.exists(pkl_path):
