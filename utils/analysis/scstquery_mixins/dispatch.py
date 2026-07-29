@@ -61,26 +61,6 @@ class DispatchMixin:
             return self.getSpiderSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'scstmappingStatus':
             return self._scstmappingStatusFallback(query_params.get('dataset'))
-        elif resulttype == 'AlphaTalk':
-            return self.getAlphaTalkLRPairs(
-                page=query_params.get('page', 1),
-                pageSize=query_params.get('pageSize', 15),
-                sender=query_params.get('sender'),
-                receiver=query_params.get('receiver'),
-                ligand=query_params.get('ligand'),
-                sortBy=query_params.get('sortBy'),
-                order=query_params.get('order'),
-                min_score=query_params.get('min_score'),
-                max_score=query_params.get('max_score'),
-                get_metadata=query_params.get('get_metadata'),
-                receptor=query_params.get('receptor'),
-                type_col=query_params.get('type'),
-                min_lr_score=query_params.get('min_lr_score'),
-                max_lr_score=query_params.get('max_lr_score'),
-                min_p_value=query_params.get('min_p_value'),
-                max_p_value=query_params.get('max_p_value'),
-                dataset=query_params.get('dataset'),
-            )
         else:
             expressionfile=self.path+ '/result/scquery/sc_output_expression.csv'
             expression = pd.read_csv(expressionfile, index_col=0)
