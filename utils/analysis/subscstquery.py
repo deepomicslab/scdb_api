@@ -152,6 +152,18 @@ class SubScstquery(Module):
                 str(p_value)
             ]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_spider.sh'
+        elif subtask_type == "alphatalk":
+            species = params.get('species', 'human').capitalize()
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            os.makedirs(outputdir, exist_ok=True)
+            self.script_arguments = [
+                mapping_h5ad,
+                outputdir,
+                species,
+            ]
+            self.shell_script = local_settings.ALPHATALK_SCRIPT
         elif self.subtask_type == 'scst_mapping':
             mapping_method = self.params.get('mapping_method', 'cytospace')
             if mapping_method == 'cytospace':

@@ -1,19 +1,40 @@
 import os
 import pickle
 import pandas as pd
+from dataset.models import Dataset
 
 
 class AlphaTalkMixin:
     """AlphaTalk cell-cell interaction result methods for Scstquery."""
+
+    def _get_alphatalk_result_dir(self, dataset_id=None, mapping_method=None):
+        if getattr(self, '_is_demo', False):
+            return os.path.join(self.path, 'result/alphatalk', 'cci_result.pkl')
+        if dataset_id:
+            try:
+                ds = Dataset.objects.get(dataset_id=dataset_id)
+                uuid = ds.title
+                base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_alphatalk', 'result')
+                if mapping_method:
+                    pkl_path = os.path.join(base, 'sc_st_mapping', mapping_method, 'cci_result.pkl')
+                    if os.path.exists(pkl_path):
+                        return pkl_path
+                flat_path = os.path.join(base, 'cci_result.pkl')
+                if os.path.exists(flat_path):
+                    return flat_path
+            except Dataset.DoesNotExist:
+                pass
+        return os.path.join(self.path, 'result/alphatalk/cci_result.pkl')
 
     def getAlphaTalkLRPairs(self, page=1, pageSize=15, 
                             sender=None, receiver=None, ligand=None, receptor=None, type_col=None,
                             min_score=None, max_score=None,
                             min_lr_score=None, max_lr_score=None,
                             min_p_value=None, max_p_value=None,
-                            sortBy=None, order=None, get_metadata=None):
+                            sortBy=None, order=None, get_metadata=None,
+                            dataset=None, mapping_method=None):
         
-        pkl_path = os.path.join(self.path, 'result/alphatalk/cci_result.pkl')
+        pkl_path = self._get_alphatalk_result_dir(dataset, mapping_method)
 
         try:
             if not os.path.exists(pkl_path):
