@@ -143,7 +143,6 @@ class DispatchMixin:
                 max_lr_score=query_params.get('max_lr_score'),
                 min_p_value=query_params.get('min_p_value'),
                 max_p_value=query_params.get('max_p_value'),
-                dataset=query_params.get('dataset'),
             )
         elif resulttype == 'networkData':
             return self.getNetworkData(query_params.get('dataset'), query_params.get('type'))
