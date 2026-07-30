@@ -5,7 +5,7 @@ import time
 import subprocess
 from dataset.models import Dataset
 from task.apps import r_proxy
-from utils.spatial_calibration import read_spatial_calibration
+from utils.spatial_calibration import read_spatial_calibration, premultiply_coords
 
 
 class CellChatMixin:
@@ -109,15 +109,8 @@ class CellChatMixin:
         scalef, spot = read_spatial_calibration(dataset)
         try:
             data = r_proxy.get_spatial(rds_path, signaling=pathway)
-            # R 端 CellChat 返回的 background_spots 坐标是 fullres 像素，
-            # 而 getImg 返回的 H&E 底图是 hires 缩略图，需乘 tissue_hires_scalef 对齐
-            if data and isinstance(data, dict) and 'background_spots' in data and scalef and scalef != 1.0:
-                spots = data['background_spots']
-                if isinstance(spots, dict):
-                    for spot_id, s in spots.items():
-                        if isinstance(s, dict) and 'x' in s and 'y' in s:
-                            s['x'] = float(s['x']) * scalef
-                            s['y'] = float(s['y']) * scalef
+            if data and isinstance(data, dict) and scalef and scalef != 1.0:
+                data = premultiply_coords(data, scalef)
             return {
                 'data': data,
                 'status': 'success',

@@ -7,10 +7,10 @@ import time
 import numpy as np
 import pandas as pd
 from collections import Counter
-import h5py
 import scanpy as sc
 
 from .models import Dataset, GlobalStat
+from utils.spatial_calibration import read_spatial_calibration
 
 # ================================
 # 1. 全局统计 (Hero Stats) - 极快
@@ -205,28 +205,7 @@ def detail_scatter(request, dataset_id):
         tissue_hires_scalef = None
         spot_diameter_fullres = None
         if coord_type == 'spatial' and 'spatial' in adata.uns:
-            try:
-                lib = next(iter(adata.uns['spatial'].keys()))
-                sf = adata.uns['spatial'][lib].get('scalefactors', {})
-                if 'tissue_hires_scalef' in sf:
-                    tissue_hires_scalef = float(sf['tissue_hires_scalef'])
-                if 'spot_diameter_fullres' in sf:
-                    spot_diameter_fullres = float(sf['spot_diameter_fullres'])
-
-                # Adjust scalef to match medium image served by getImg (max 800px)
-                if tissue_hires_scalef is not None:
-                    try:
-                        with h5py.File(file_path, 'r') as f_h5:
-                            hires_img_key = f'uns/spatial/{lib}/images/hires'
-                            if hires_img_key in f_h5:
-                                hires_h, hires_w = f_h5[hires_img_key].shape[0], f_h5[hires_img_key].shape[1]
-                                MEDIUM_MAX = 800
-                                medium_ratio = min(MEDIUM_MAX / hires_w, MEDIUM_MAX / hires_h)
-                                tissue_hires_scalef = tissue_hires_scalef * medium_ratio
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            tissue_hires_scalef, spot_diameter_fullres = read_spatial_calibration(dataset_id)
 
         target_cols = ['cell_type', 'annotation', 'Label', 'donor', 'donor_id', 'tissue']
         available_cols = [c for c in target_cols if c in adata.obs.columns]

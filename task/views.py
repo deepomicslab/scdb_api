@@ -18,6 +18,7 @@ from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 from utils.mapping_paths import check_mapping_completed
 import pickle
+from utils.spatial_calibration import MEDIUM_MAX_SIZE
 
 
 def _sync_dependency_from_slurm(dep_subtask):
@@ -283,7 +284,7 @@ def getImg(request):
         else:
             # 默认（无 param 或 ?resolution=medium）：medium
             cache_path = ds.file_path.replace(".h5ad", "_tissue_medium.jpg")
-            max_size = 800
+            max_size = MEDIUM_MAX_SIZE
             content_type = 'image/jpeg'
             save_format = 'JPEG'
             save_kwargs = {'quality': 80, 'optimize': True}
