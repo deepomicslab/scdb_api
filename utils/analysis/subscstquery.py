@@ -96,18 +96,14 @@ class SubScstquery(Module):
             ]
             self.shell_script = "/data3/platform/sc_db/commot/run_commot.sh"
         elif subtask_type == "cellchat":
-            # 1. 提取参数 (使用 params.get 设置默认值，与 R 脚本保持逻辑一致)
             groupby = params.get('groupby', 'cell_type')
-            
-            # 注意：前端可能传 'signaling'，对应 R 的 db_mode
-            db_mode = params.get('db_mode', 'Secreted Signaling') 
-            
-            # 新增参数
-            datatype = params.get('datatype', 'sc')        # sc 或 st
-            min_cells = params.get('min_cells', 10)        # 整数
-            contact_range = params.get('contact_range', 100) # ST专用
-            scale_distance = params.get('scale_distance', 50) # ST专用
-            zero_dist_handle = params.get('zero_dist_handle', 'jitter')  # ST only
+            db_mode = params.get('db_mode', 'all')
+            datatype = params.get('datatype', 'st')
+            min_cells = params.get('min_cells', 10)
+            zero_dist_handle = params.get('zero_dist_handle', 'jitter')
+            cellchat_type = params.get('type', 'truncatedMean')
+            trim = str(params.get('trim', 0.1))
+            interaction_range = str(params.get('interaction_range', 250))
 
             mapping_method = self.params.get('mapping_method', 'cytospace')
             if datatype == 'sc':
@@ -116,22 +112,24 @@ class SubScstquery(Module):
                 outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
             os.makedirs(outputdir, exist_ok=True)
             output_filepath = os.path.join(outputdir, "cellchat_result.rds")
-            
+
             mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
-                mapping_h5ad,          # $1: input h5ad (mapping output)
-                output_filepath,      # $2: Output (建议把输出放前面，逻辑更顺)
-                groupby,              # $3: Groupby
-                db_mode,              # $4: DB Mode
-                datatype,             # $5: Datatype
-                str(min_cells),       # $6: Min Cells (转字符串)
-                str(contact_range),   # $7: Contact Range
-                str(scale_distance),  # : Scale Distance (auto-calculated in R)
-                zero_dist_handle     # : Same-spot cell handling
+                mapping_h5ad,
+                output_filepath,
+                groupby,
+                db_mode,
+                datatype,
+                str(min_cells),
+                zero_dist_handle,
+                cellchat_type,
+                cellchat_type,
+                trim,
+                interaction_range,
+                'FALSE',
             ]
-            
+
             print(f"CellChat Args: {self.script_arguments}")
-            
             self.shell_script = "/data3/platform/sc_db/cellchat/run_slurm_cellchat.sh"
         elif subtask_type == "spider":
             species = params.get('species', 'human')
@@ -170,13 +168,15 @@ class SubScstquery(Module):
             species = params.get('species', 'human').capitalize()
             mapping_method = self.params.get('mapping_method', 'cytospace')
             cluster_key = params.get('groupby', 'cell_type')
-            db_mode = params.get('db_mode', 'Secreted Signaling')
+            db_mode = params.get('db_mode', 'secreted')
             min_cells = str(params.get('min_cells', 10))
-            contact_range = str(params.get('contact_range', 100))
-            scale_distance = str(params.get('scale_distance', 50))
             zero_dist_handle = params.get('zero_dist_handle', 'jitter')
+            sc_type = params.get('sc_type', 'triMean')
+            st_type = params.get('st_type', 'truncatedMean')
+            trim = str(params.get('trim', 0.1))
+            interaction_range = str(params.get('interaction_range', 250))
+            population_size = str(params.get('population_size', False))
 
-            # 存储参数供 process() 使用
             self._lr_species = species
             self._lr_mapping_method = mapping_method
             self._lr_cluster_key = cluster_key
@@ -184,9 +184,12 @@ class SubScstquery(Module):
                 'groupby': cluster_key,
                 'db_mode': db_mode,
                 'min_cells': min_cells,
-                'contact_range': contact_range,
-                'scale_distance': scale_distance,
                 'zero_dist_handle': zero_dist_handle,
+                'sc_type': sc_type,
+                'st_type': st_type,
+                'trim': trim,
+                'interaction_range': interaction_range,
+                'population_size': population_size,
             }
 
             # 产物路径: SC CellChat
@@ -272,9 +275,12 @@ class SubScstquery(Module):
                     cc['db_mode'],             # $4: db_mode
                     'sc',                      # $5: datatype
                     cc['min_cells'],           # $6: min_cells
-                    cc['contact_range'],       # $7: contact_range
-                    cc['scale_distance'],      # $8: scale_distance
-                    cc['zero_dist_handle'],    # $9: zero_dist_handle
+                    cc['zero_dist_handle'],    # $7: zero_dist_handle
+                    cc['sc_type'],             # $8: sc_type
+                    cc['st_type'],             # $9: st_type
+                    cc['trim'],                # $10: trim
+                    cc['interaction_range'],   # $11: interaction_range
+                    cc['population_size'],     # $12: population_size
                 ]
                 sc_job_id = slurm_api.submit_job(cellchat_script, sc_args)
                 self.params['_sc_cellchat_job_id'] = sc_job_id
@@ -295,9 +301,12 @@ class SubScstquery(Module):
                     cc['db_mode'],             # $4: db_mode
                     'st',                      # $5: datatype
                     cc['min_cells'],           # $6: min_cells
-                    cc['contact_range'],       # $7: contact_range
-                    cc['scale_distance'],      # $8: scale_distance
-                    cc['zero_dist_handle'],    # $9: zero_dist_handle
+                    cc['zero_dist_handle'],    # $7: zero_dist_handle
+                    cc['sc_type'],             # $8: sc_type
+                    cc['st_type'],             # $9: st_type
+                    cc['trim'],                # $10: trim
+                    cc['interaction_range'],   # $11: interaction_range
+                    cc['population_size'],     # $12: population_size
                 ]
                 st_job_id = slurm_api.submit_job(cellchat_script, st_args)
                 self.params['_st_cellchat_job_id'] = st_job_id
