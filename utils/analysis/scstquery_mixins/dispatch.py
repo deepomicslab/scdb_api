@@ -58,7 +58,9 @@ class DispatchMixin:
         elif resulttype == 'spider_lr':
             return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'), query_params.get('mapping_method'))
         elif resulttype == 'spider_spearman':
-            return self.getSpiderSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
+            return self.getLRSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
+        elif resulttype == 'lr_spearman':
+            return self.getLRSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'scstmappingStatus':
             return self._scstmappingStatusFallback(query_params.get('dataset'))
         elif resulttype == 'AlphaTalk':
@@ -142,8 +144,7 @@ class DispatchMixin:
             # 获取特定 LR 的数值
             return self.getSpiderLRData(query_params.get('dataset'), query_params.get('lr_name'), query_params.get('mapping_method'))
         elif resulttype == 'spider_spearman':
-            # --- 新增：Spearman 分析数据接口 ---
-            return self.getSpiderSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
+            return self.getLRSpearmanData(query_params.get('dataset'), query_params.get('mapping_method'))
         elif resulttype == 'scstmappingStatus':
             return self._scstmappingStatusFallback(query_params.get('dataset'))
         elif resulttype == 'AlphaTalk':

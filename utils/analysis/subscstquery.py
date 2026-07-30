@@ -2,8 +2,9 @@ import os
 import pandas as pd
 from scdb_api import settings_local as local_settings
 from utils.mapping_paths import resolve_mapping_output_path
-from task.models import TaskStatus
+from task.models import TaskStatus, SubTask
 from .base import Module
+import utils.slurm_api as slurm_api
 
 
 class SubScstquery(Module):
@@ -12,6 +13,7 @@ class SubScstquery(Module):
         self.params = params
         self.subtask_type = subtask_type
         self.dataset_uuid = dataset_uuid
+        self._dataset_path = dataset_path
         userid = params['userid']  # 假设传 userid（或从 main_userpath 解析）
         super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
@@ -164,6 +166,50 @@ class SubScstquery(Module):
                 species,
             ]
             self.shell_script = local_settings.ALPHATALK_SCRIPT
+        elif subtask_type == "lr_comparison":
+            species = params.get('species', 'human').capitalize()
+            mapping_method = self.params.get('mapping_method', 'cytospace')
+            cluster_key = params.get('groupby', 'cell_type')
+            db_mode = params.get('db_mode', 'Secreted Signaling')
+            min_cells = str(params.get('min_cells', 10))
+            contact_range = str(params.get('contact_range', 100))
+            scale_distance = str(params.get('scale_distance', 50))
+            zero_dist_handle = params.get('zero_dist_handle', 'jitter')
+
+            # 存储参数供 process() 使用
+            self._lr_species = species
+            self._lr_mapping_method = mapping_method
+            self._lr_cluster_key = cluster_key
+            self._lr_cellchat_params = {
+                'groupby': cluster_key,
+                'db_mode': db_mode,
+                'min_cells': min_cells,
+                'contact_range': contact_range,
+                'scale_distance': scale_distance,
+                'zero_dist_handle': zero_dist_handle,
+            }
+
+            # 产物路径: SC CellChat
+            cellchat_base = os.path.join(user_main_dir, f'dataset_{dataset_uuid}', 'subtask_cellchat', 'result')
+            self._sc_cellchat_rds = os.path.join(cellchat_base, 'sc', 'cellchat_result.rds')
+            self._sc_cellchat_exists = os.path.exists(self._sc_cellchat_rds)
+
+            # 产物路径: SC+ST CellChat
+            self._st_cellchat_rds = os.path.join(cellchat_base, 'sc_st_mapping', mapping_method, 'cellchat_result.rds')
+            self._st_cellchat_exists = os.path.exists(self._st_cellchat_rds)
+
+            # 后处理输出路径
+            lr_base = os.path.join(self.path, 'result')
+            self._sc_spearman_dir = os.path.join(lr_base, 'spearman', '')
+            self._st_spearman_dir = os.path.join(lr_base, 'sc_st_mapping', mapping_method, 'spearman', '')
+            os.makedirs(os.path.dirname(self._sc_spearman_dir.rstrip('/')), exist_ok=True)
+            os.makedirs(os.path.dirname(self._st_spearman_dir.rstrip('/')), exist_ok=True)
+
+            # 输入数据
+            self._sc_input_h5ad = main_input_h5ad_path
+            self._st_input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+
+            self.shell_script = None  # process() 会直接调用 submit_job
         elif self.subtask_type == 'scst_mapping':
             mapping_method = self.params.get('mapping_method', 'cytospace')
             if mapping_method == 'cytospace':
@@ -188,11 +234,96 @@ class SubScstquery(Module):
         else:
             raise ValueError(f"不支持的小种类: {subtask_type}")
 
+    def _check_running_cellchat(self):
+        from django.db.models import Q
+        running = SubTask.objects.filter(
+            main_task__userpath=self.user_main_dir.replace(local_settings.USERTASKPATH, ''),
+            subtask_type='cellchat',
+            dataset_path=self._dataset_path,
+        ).filter(
+            Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
+        ).first()
+        if running:
+            raise ValueError(
+                f"CellChat subtask (id={running.id}) is still running. "
+                "Please wait for it to complete before running LR Pair Comparison."
+            )
+
     def _resolve_mapping_output(self, dataset_uuid, mapping_method='cytospace'):
         return resolve_mapping_output_path(self.user_main_dir, str(dataset_uuid), mapping_method)
 
 
     def process(self):
+        if self.subtask_type == 'lr_comparison':
+            cellchat_script = "/data3/platform/sc_db/cellchat/run_slurm_cellchat.sh"
+            postprocess_script = getattr(local_settings, 'LR_COMPARISON_POSTPROCESS_SCRIPT', None)
+
+            dependency_job_ids = []
+
+            # 1. SC CellChat
+            if not self._sc_cellchat_exists:
+                sc_outputdir = os.path.dirname(self._sc_cellchat_rds)
+                os.makedirs(sc_outputdir, exist_ok=True)
+                cc = self._lr_cellchat_params
+                sc_args = [
+                    self._sc_input_h5ad,      # $1: input h5ad
+                    self._sc_cellchat_rds,     # $2: output rds
+                    cc['groupby'],             # $3: groupby
+                    cc['db_mode'],             # $4: db_mode
+                    'sc',                      # $5: datatype
+                    cc['min_cells'],           # $6: min_cells
+                    cc['contact_range'],       # $7: contact_range
+                    cc['scale_distance'],      # $8: scale_distance
+                    cc['zero_dist_handle'],    # $9: zero_dist_handle
+                ]
+                sc_job_id = slurm_api.submit_job(cellchat_script, sc_args)
+                self.params['_sc_cellchat_job_id'] = sc_job_id
+                dependency_job_ids.append(sc_job_id)
+            else:
+                self.params['_sc_cellchat_job_id'] = None
+
+            # 2. SC+ST CellChat
+            if not self._st_cellchat_exists:
+                self._check_running_cellchat()
+                st_outputdir = os.path.dirname(self._st_cellchat_rds)
+                os.makedirs(st_outputdir, exist_ok=True)
+                cc = self._lr_cellchat_params
+                st_args = [
+                    self._st_input_h5ad,       # $1: input h5ad (mapping output)
+                    self._st_cellchat_rds,     # $2: output rds
+                    cc['groupby'],             # $3: groupby
+                    cc['db_mode'],             # $4: db_mode
+                    'st',                      # $5: datatype
+                    cc['min_cells'],           # $6: min_cells
+                    cc['contact_range'],       # $7: contact_range
+                    cc['scale_distance'],      # $8: scale_distance
+                    cc['zero_dist_handle'],    # $9: zero_dist_handle
+                ]
+                st_job_id = slurm_api.submit_job(cellchat_script, st_args)
+                self.params['_st_cellchat_job_id'] = st_job_id
+                dependency_job_ids.append(st_job_id)
+            else:
+                self.params['_st_cellchat_job_id'] = None
+
+            # 3. 合并后处理
+            post_args = [
+                self._sc_input_h5ad,          # $1: SC h5ad
+                self._sc_cellchat_rds,        # $2: SC rds
+                self._st_input_h5ad,          # $3: ST h5ad
+                self._st_cellchat_rds,        # $4: ST rds
+                self._sc_spearman_dir,        # $5: SC spearman 输出目录
+                self._st_spearman_dir,        # $6: ST spearman 输出目录
+                self._lr_cluster_key,         # $7: cluster_key
+            ]
+            post_job_id = slurm_api.submit_job(
+                postprocess_script, post_args,
+                dependency_job_ids=dependency_job_ids if dependency_job_ids else None
+            )
+
+            self.job_id = post_job_id
+            self.status = TaskStatus.RUNNING
+            return self.job_id
+
         if self.subtask_type == 'recall_analysis':
             if self.dependencies:
                 self.status = TaskStatus.PENDING

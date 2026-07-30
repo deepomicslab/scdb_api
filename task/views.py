@@ -519,18 +519,43 @@ def subtask_log(request):
 
     log_path = log_pattern.format(job_id=job_id)
     try:
-        with open(log_path, 'r', errors='replace') as f:
-            lines = f.readlines()
+        try:
+            with open(log_path, 'r', errors='replace') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            # For lr_comparison, fallback to CellChat job logs
+            if subtask_type == 'lr_comparison':
+                cellchat_log_pattern = getattr(local_settings, 'SLURM_LOG_PATHS', {}).get(('cellchat', None))
+                if cellchat_log_pattern:
+                    cellchat_lines = []
+                    for key in ('_sc_cellchat_job_id', '_st_cellchat_job_id'):
+                        cj = params.get(key)
+                        if cj:
+                            try:
+                                cellchat_log_path = cellchat_log_pattern.format(job_id=cj)
+                                with open(cellchat_log_path, 'r', errors='replace') as f:
+                                    cellchat_lines.append("=== CellChat job %s log ===\n" % cj)
+                                    cellchat_lines.extend(f.readlines()[-30:])
+                                    cellchat_lines.append("\n")
+                            except (FileNotFoundError, OSError):
+                                pass
+                    if cellchat_lines:
+                        log_content = ''.join(cellchat_lines)
+                        import re
+                        log_content = re.sub(r'/data[23]/platform/\S+', '[DATA_PATH]', log_content)
+                        log_content = re.sub(r'/data[23]/\S+', '[DATA_PATH]', log_content)
+                        log_content = re.sub(r'/home/platform/\S+', '[PATH]', log_content)
+                        return Response({'status': 'Success', 'log': log_content})
+            return Response({'status': 'Failed', 'message': 'Log file not found.'}, status=404)
+
         # --- Extract error-relevant lines ---
         import re
-        # Patterns that indicate error context
         error_keywords = re.compile(
-            r'(?i)(traceback|error|exception|failed|fatal|slurmstepd|'
+            r'(?i)(traceback|error|exception|failed|fatal|slurmstepd|'
             r'cannot|unable to|no such file|permission denied|'
             r'keyerror|valueerror|filenotfound|runtimeerror|'
             r'assertionerror|memoryerror|timeout|killed)'
         )
-        # Collect error blocks: Traceback sections + keyword lines with context
         error_lines = []
         in_traceback = False
         for i, line in enumerate(lines):
@@ -539,33 +564,26 @@ def subtask_log(request):
                 error_lines.append(i)
                 continue
             if in_traceback:
-                # Traceback body: indented lines or the final error line
-                if line.startswith(' ') or line.startswith('	') or line.strip() == '':
+                if line.startswith(' ') or line.startswith('\t') or line.strip() == '':
                     error_lines.append(i)
                 else:
                     in_traceback = False
-                    # Check if this is the final error line (non-indented, after traceback)
                     if error_keywords.search(line):
                         error_lines.append(i)
             elif error_keywords.search(line):
-                # Add context: 2 lines before and after
                 for j in range(max(0, i - 2), min(len(lines), i + 3)):
                     if j not in error_lines:
                         error_lines.append(j)
-        # Deduplicate and sort
         error_lines = sorted(set(error_lines))
         if error_lines:
             selected = [lines[i] for i in error_lines]
         else:
-            # Fallback: last 30 lines
             selected = lines[-30:]
         log_content = ''.join(selected)
-        # --- Sanitize sensitive paths ---
         log_content = re.sub(r'/data[23]/platform/\S+', '[DATA_PATH]', log_content)
         log_content = re.sub(r'/data[23]/\S+', '[DATA_PATH]', log_content)
         log_content = re.sub(r'/home/platform/\S+', '[PATH]', log_content)
         return Response({'status': 'Success', 'log': log_content})
-    except FileNotFoundError:
-        return Response({'status': 'Failed', 'message': 'Log file not found.'}, status=404)
+
     except Exception as e:
         return Response({'status': 'Failed', 'message': str(e)}, status=500)
