@@ -68,6 +68,7 @@ def submit_job(shell_script, script_arguments=None, dependency_job_ids=None):
                                     for job_id in dependency_job_ids)
         sbatch_command.extend(
             ["--dependency=afterok:{}".format(dependencies_str)])
+        sbatch_command.extend(["--kill-on-invalid-dep=yes"])
     sbatch_command.append(shell_script)
     if script_arguments is not None:
         sbatch_command.extend(script_arguments)
