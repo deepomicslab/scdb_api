@@ -7,6 +7,7 @@ import time
 import numpy as np
 import pandas as pd
 from collections import Counter
+import h5py
 import scanpy as sc
 
 from .models import Dataset, GlobalStat
@@ -211,6 +212,19 @@ def detail_scatter(request, dataset_id):
                     tissue_hires_scalef = float(sf['tissue_hires_scalef'])
                 if 'spot_diameter_fullres' in sf:
                     spot_diameter_fullres = float(sf['spot_diameter_fullres'])
+
+                # Adjust scalef to match medium image served by getImg (max 800px)
+                if tissue_hires_scalef is not None:
+                    try:
+                        with h5py.File(file_path, 'r') as f_h5:
+                            hires_img_key = f'uns/spatial/{lib}/images/hires'
+                            if hires_img_key in f_h5:
+                                hires_h, hires_w = f_h5[hires_img_key].shape[0], f_h5[hires_img_key].shape[1]
+                                MEDIUM_MAX = 800
+                                medium_ratio = min(MEDIUM_MAX / hires_w, MEDIUM_MAX / hires_h)
+                                tissue_hires_scalef = tissue_hires_scalef * medium_ratio
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
