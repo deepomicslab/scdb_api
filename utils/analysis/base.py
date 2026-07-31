@@ -52,6 +52,17 @@ class Module:
             ).filter(
                 Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
             )
+            # Sync each active mapping subtask's real SLURM status into the DB
+            # before classifying, so running/failed reflect reality (frontend polls
+            # this endpoint automatically, and the Refresh button also routes here).
+            for st in running_qs:
+                try:
+                    new_status = st.sync_from_slurm()
+                    if new_status and new_status != st.status:
+                        st.save()
+                except Exception:
+                    pass
+
             running_methods = []
             seen = set()
             for st in running_qs:
