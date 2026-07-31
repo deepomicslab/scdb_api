@@ -47,11 +47,11 @@ class Module:
             # (triggered by annotation-mapping / recall-analysis auto-chain).
             running_qs = SubTaskModel.objects.filter(
                 main_task=main_task,
-                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering'],
+                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering', 'lr_comparison'],
                 dataset_path=dataset_id,
             ).filter(
                 Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
-            )
+            ).order_by('-id')
             # Sync each active mapping subtask's real SLURM status into the DB
             # before classifying, so running/failed reflect reality (frontend polls
             # this endpoint automatically, and the Refresh button also routes here).
@@ -68,7 +68,7 @@ class Module:
             seen = set()
             for st in running_qs:
                 params = st.parameters if isinstance(st.parameters, dict) else {}
-                if st.subtask_type == 'scst_mapping':
+                if st.subtask_type in ('scst_mapping', 'lr_comparison'):
                     m = params.get('mapping_method')
                 elif st.subtask_type == 'he_scatter':
                     m = 'he_scatter'
@@ -82,17 +82,17 @@ class Module:
             # Collect failed mapping methods (non-completed, non-active terminal states)
             failed_qs = SubTaskModel.objects.filter(
                 main_task=main_task,
-                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering'],
+                subtask_type__in=['scst_mapping', 'he_scatter', 'hierarchical_clustering', 'lr_comparison'],
                 dataset_path=dataset_id,
             ).exclude(
                 Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
                 | Q(status__iexact='completed')
-            )
+            ).order_by('-id')
             failed_methods = []
             seen_failed = set()
             for st in failed_qs:
                 params = st.parameters if isinstance(st.parameters, dict) else {}
-                if st.subtask_type == 'scst_mapping':
+                if st.subtask_type in ('scst_mapping', 'lr_comparison'):
                     m = params.get('mapping_method')
                 elif st.subtask_type == 'he_scatter':
                     m = 'he_scatter'
