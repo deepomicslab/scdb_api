@@ -57,8 +57,9 @@ class Module:
             # this endpoint automatically, and the Refresh button also routes here).
             for st in running_qs:
                 try:
+                    prev_status = st.status
                     new_status = st.sync_from_slurm()
-                    if new_status and new_status != st.status:
+                    if new_status and new_status != prev_status:
                         st.save()
                 except Exception:
                     pass
