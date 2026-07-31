@@ -202,11 +202,14 @@ class SubScstquery(Module):
             self._st_cellchat_exists = os.path.exists(self._st_cellchat_rds)
 
             # 后处理输出路径
+            # 注意: shell 脚本 run_lr_comparison_postprocess.sh 会在 OUTPUT_DIR 下再拼一层
+            # "spearman" 作为 spearman_down_stream_gene.py 的输出目录, 所以这里只传 result 根目录,
+            # 避免产生 result/spearman/spearman 双层路径 (与后端 getLRSpearmanData 读取路径保持一致)。
             lr_base = os.path.join(self.path, 'result')
-            self._sc_spearman_dir = os.path.join(lr_base, 'spearman', '')
-            self._st_spearman_dir = os.path.join(lr_base, 'sc_st_mapping', mapping_method, 'spearman', '')
-            os.makedirs(os.path.dirname(self._sc_spearman_dir.rstrip('/')), exist_ok=True)
-            os.makedirs(os.path.dirname(self._st_spearman_dir.rstrip('/')), exist_ok=True)
+            self._sc_spearman_dir = os.path.join(lr_base, '')
+            self._st_spearman_dir = os.path.join(lr_base, 'sc_st_mapping', mapping_method, '')
+            os.makedirs(lr_base, exist_ok=True)
+            os.makedirs(os.path.join(lr_base, 'sc_st_mapping', mapping_method), exist_ok=True)
 
             # 输入数据
             self._sc_input_h5ad = main_input_h5ad_path
