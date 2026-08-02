@@ -119,6 +119,7 @@ class Dataset(models.Model):
         源图优先级与 getImg 一致（hires → lowres），3 档均由同一源生成。
         """
         import h5py
+        from PIL import Image
         from django.conf import settings
         from utils.spatial_calibration import MEDIUM_MAX_SIZE, pil_image_from_array
 
