@@ -51,7 +51,9 @@ class TaskConfig(AppConfig):
             return
 
         # 同样排除 migrate 等命令
-        if not any(x in sys.argv for x in ['runserver', 'gunicorn', 'uwsgi']):
+        # 注意：gunicorn 的 sys.argv[0] 是完整路径（如 /data2/.../bin/gunicorn），
+        # 精确匹配会失败，必须按 basename 判断。
+        if not any(os.path.basename(str(x)) in ('runserver', 'gunicorn', 'uwsgi') for x in sys.argv):
             return
 
         print("🔹 [AppConfig] 初始化 R 子系统连接...")

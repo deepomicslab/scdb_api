@@ -13,7 +13,8 @@ class CoreConfig(AppConfig):
     def ready(self):
         # Only run inside web server process (runserver / gunicorn / uwsgi)
         # Skip management commands like migrate / makemigrations / shell / test
-        if not any(x in sys.argv for x in ['runserver', 'gunicorn', 'uwsgi']):
+        # 注意：gunicorn 的 sys.argv[0] 是完整路径，需按 basename 判断
+        if not any(os.path.basename(str(x)) in ('runserver', 'gunicorn', 'uwsgi') for x in sys.argv):
             return
 
         # Django autoreloader forks twice; only run in the real serving child
