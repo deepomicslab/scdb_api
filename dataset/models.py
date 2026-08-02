@@ -119,9 +119,8 @@ class Dataset(models.Model):
         源图优先级与 getImg 一致（hires → lowres），3 档均由同一源生成。
         """
         import h5py
-        from PIL import Image
         from django.conf import settings
-        from utils.spatial_calibration import MEDIUM_MAX_SIZE
+        from utils.spatial_calibration import MEDIUM_MAX_SIZE, pil_image_from_array
 
         file_path = self.file_path
         if not file_path or not os.path.exists(file_path):
@@ -147,7 +146,7 @@ class Dataset(models.Model):
             out_dir = os.path.join(settings.MEDIA_ROOT, image_dir)
             os.makedirs(out_dir, exist_ok=True)
 
-            img = Image.fromarray(source)
+            img = pil_image_from_array(source)
             specs = [
                 ('thumbnail.jpg', 400, 75),
                 ('medium.jpg', MEDIUM_MAX_SIZE, 80),

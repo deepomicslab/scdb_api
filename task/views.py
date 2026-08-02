@@ -261,6 +261,7 @@ def getImg(request):
     if image_analysis_type == "he":
         from django.conf import settings
         from PIL import Image
+        from utils.spatial_calibration import pil_image_from_array
 
         # Try dataset_id (UUID) first, then fall back to title
         ds = None
@@ -309,7 +310,7 @@ def getImg(request):
                         for img_key in ("hires", "lowres"):
                             img_full = f"uns/spatial/{lib}/images/{img_key}"
                             if img_full in f:
-                                img = Image.fromarray(f[img_full][:])
+                                img = pil_image_from_array(f[img_full][:])
                                 if max_size:
                                     img.thumbnail((max_size, max_size), Image.LANCZOS)
                                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)

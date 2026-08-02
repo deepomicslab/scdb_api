@@ -1,9 +1,25 @@
 import os
 import h5py
+from PIL import Image
 from dataset.models import Dataset
 
 
 MEDIUM_MAX_SIZE = 800
+
+
+def pil_image_from_array(arr):
+    """h5ad 图像数组 → JPEG 可写的 PIL Image。
+
+    JPEG 不支持 RGBA/带 alpha 的模式：透明图先合成到白底，其它非常规模式转 RGB。
+    """
+    img = Image.fromarray(arr)
+    if img.mode == 'RGBA':
+        background = Image.new('RGB', img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[-1])
+        img = background
+    elif img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
+    return img
 
 
 def premultiply_coords(data, scalef):
@@ -60,7 +76,15 @@ def extract_spatial_calibration(file_path):
             if not libs:
                 return scalef, spot, img_w, img_h
 
-            lib = libs[0]
+            # 库选择：跳过标量标志位（如 is_single），取第一个含 images/scalefactors 的 Group
+            lib = None
+            for candidate in libs:
+                node = f.get(f'uns/spatial/{candidate}')
+                if isinstance(node, h5py.Group) and ('images' in node or 'scalefactors' in node):
+                    lib = candidate
+                    break
+            if lib is None:
+                return scalef, spot, img_w, img_h
 
             spot_key = f'uns/spatial/{lib}/scalefactors/spot_diameter_fullres'
             if spot_key in f:
