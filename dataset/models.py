@@ -54,10 +54,8 @@ class Dataset(models.Model):
     # 空间校准 + 图片（导入/backfill 时提取一次，getImg 与散点接口直读，不再每次开 h5ad）
     # image_dir: 相对 MEDIA_ROOT 的图片文件夹，文件名按约定 thumbnail.jpg / medium.jpg / hires.jpg
     image_dir = models.CharField(max_length=300, blank=True, default='', editable=False)
-    # scalef_raw: h5ad 原始 scalef（未乘 medium_ratio）；读取时按 image_w/h 计算 medium 空间值
+    # scalef_raw: h5ad 原始 scalef（未乘 ratio）；medium 空间换算由读取方按实际图片文件尺寸实时计算
     scalef_raw = models.FloatField(null=True, blank=True, editable=False)
-    image_w = models.IntegerField(null=True, blank=True, editable=False)
-    image_h = models.IntegerField(null=True, blank=True, editable=False)
     spot_diameter_fullres = models.FloatField(null=True, blank=True, editable=False)
 
     citation_label = models.CharField(max_length=500, blank=True, default='')
@@ -102,12 +100,10 @@ class Dataset(models.Model):
 
         # 空间校准（h5py 只读标量/元数据；局部导入避免与 utils.spatial_calibration 循环引用）
         from utils.spatial_calibration import extract_spatial_calibration
-        scalef_raw, spot, img_w, img_h = extract_spatial_calibration(self.file_path)
+        scalef_raw, spot = extract_spatial_calibration(self.file_path)
         if scalef_raw is not None or spot is not None:
             self.scalef_raw = scalef_raw
             self.spot_diameter_fullres = spot
-            self.image_w = img_w
-            self.image_h = img_h
 
         # 提图 3 档 JPEG（getImg 直读，不再按需从 h5ad 提取）
         self._extract_images()
@@ -121,7 +117,7 @@ class Dataset(models.Model):
         import h5py
         from PIL import Image
         from django.conf import settings
-        from utils.spatial_calibration import MEDIUM_MAX_SIZE, pil_image_from_array
+        from utils.spatial_calibration import IMAGE_RES_SPECS, pil_image_from_array
 
         file_path = self.file_path
         if not file_path or not os.path.exists(file_path):
@@ -148,16 +144,12 @@ class Dataset(models.Model):
             os.makedirs(out_dir, exist_ok=True)
 
             img = pil_image_from_array(source)
-            specs = [
-                ('thumbnail.jpg', 400, 75),
-                ('medium.jpg', MEDIUM_MAX_SIZE, 80),
-                ('hires.jpg', None, 85),
-            ]
-            for filename, max_size, quality in specs:
+            # 规格表单一来源（IMAGE_RES_SPECS）：文件名/最大尺寸/质量
+            for filename, max_size, save_kwargs in IMAGE_RES_SPECS.values():
                 copy = img.copy()
                 if max_size:
                     copy.thumbnail((max_size, max_size), Image.LANCZOS)
-                copy.save(os.path.join(out_dir, filename), 'JPEG', quality=quality, optimize=True)
+                copy.save(os.path.join(out_dir, filename), 'JPEG', **save_kwargs)
 
             if not self.image_dir:
                 self.image_dir = image_dir

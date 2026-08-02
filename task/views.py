@@ -18,7 +18,7 @@ from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list,get_cluster_list
 from utils.mapping_paths import check_mapping_completed
 import pickle
-from utils.spatial_calibration import MEDIUM_MAX_SIZE
+from utils.spatial_calibration import IMAGE_RES_SPECS
 
 
 def _sync_dependency_from_slurm(dep_subtask):
@@ -242,25 +242,59 @@ def taskresultview(request):
 # max-age=86400（1 天）：重导入数据集后旧图最多滞后 1 天（或用户强制刷新即失效）。
 _IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
 
-# resolution → MEDIA_ROOT/{image_dir}/ 下的文件名约定（与 Dataset._extract_images 一致）
-_IMG_RESOLUTION_FILES = {
-    'thumbnail': 'thumbnail.jpg',
-    'original': 'hires.jpg',
-    'medium': 'medium.jpg',
-}
+
+def _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
+    """确保目标分辨率图片存在且符合当前尺寸常量，不符则从 hires.jpg 压缩重建。
+
+    - target = min(max_size, hires 长边)（源图比常量小时 thumbnail 不会放大）；
+    - 当前文件长边与 target 偏差 >1px 视为过期 → 重建（不解码像素，仅读头部）；
+    - 返回 True 表示文件可用（存在且尺寸符合）；False 表示无法从 hires 得到。
+    """
+    import os
+    from PIL import Image
+
+    try:
+        hw, hh = None, None
+        if os.path.exists(hires_path):
+            with Image.open(hires_path) as himg:
+                hw, hh = himg.width, himg.height
+        if not hw or not hh:
+            return False
+
+        if os.path.exists(cache_path):
+            with Image.open(cache_path) as mimg:
+                cur_long = max(mimg.width, mimg.height)
+            target = min(max_size, max(hw, hh)) if max_size else max(hw, hh)
+            if abs(cur_long - target) <= 1:
+                return True
+        elif max_size is None:
+            # original 档：hires 本身即目标
+            return True
+
+        # 重建：压缩 hires.jpg（不解码像素为数组，仅 LANCZOS 缩放 + 重新编码）
+        with Image.open(hires_path) as himg:
+            img = himg.copy()
+            if max_size:
+                img.thumbnail((max_size, max_size), Image.LANCZOS)
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            img.save(cache_path, 'JPEG', **save_kwargs)
+        return True
+    except Exception as e:
+        print(f"[getImg] _ensure_resolution_image failed: {e}")
+        return False
+
 
 @api_view(['GET', 'HEAD'])
 def getImg(request):
     image_analysis_type = request.query_params.get('image_analysis_type')
     image_id = request.query_params.get('image_id')
     # Optional resolution hint: 'thumbnail' returns a 400x400 max downscaled
-    # JPEG (file name per _IMG_RESOLUTION_FILES under MEDIA_ROOT/{image_dir}).
+    # JPEG (file name per IMAGE_RES_SPECS under MEDIA_ROOT/{image_dir}).
     # Default returns the full hires image (backwards compatible).
     resolution = request.query_params.get('resolution')
 
     if image_analysis_type == "he":
         from django.conf import settings
-        from PIL import Image
         from utils.spatial_calibration import pil_image_from_array
 
         # Try dataset_id (UUID) first, then fall back to title
@@ -276,33 +310,32 @@ def getImg(request):
         if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
 
-        # 3 档 resolution：
+        # 3 档 resolution（规格表单一来源）：
         #   thumbnail : 400x400 JPEG q75  (~13KB)  — 卡片缩略图
         #   medium    : 800x800 JPEG q80  (~50-100KB) — 散点图底图（默认）
         #   original  : 完整分辨率 JPEG q85 (~1MB)   — 高清 opt-in
-        if resolution == 'thumbnail':
-            filename = _IMG_RESOLUTION_FILES['thumbnail']
-            max_size = 400
-            save_kwargs = {'quality': 75, 'optimize': True}
-        elif resolution == 'original':
-            filename = _IMG_RESOLUTION_FILES['original']
-            max_size = None  # 完整分辨率
-            save_kwargs = {'quality': 85, 'optimize': True}
-        else:
-            # 默认（无 param 或 ?resolution=medium）：medium
-            filename = _IMG_RESOLUTION_FILES['medium']
-            max_size = MEDIUM_MAX_SIZE
-            save_kwargs = {'quality': 80, 'optimize': True}
+        key = resolution if resolution in IMAGE_RES_SPECS else 'medium'
+        filename, max_size, save_kwargs = IMAGE_RES_SPECS[key]
         content_type = 'image/jpeg'
-        save_format = 'JPEG'
 
         image_dir = ds.image_dir or f'st/{ds.dataset_id}'
         cache_path = os.path.join(settings.MEDIA_ROOT, image_dir, filename)
+        hires_path = os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg')
 
+        # 优先：从 hires.jpg 校验/重建（thumbnail/medium 档，MEDIUM_MAX_SIZE 变动自动跟上）
+        if _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
+            if not ds.image_dir:
+                Dataset.objects.filter(dataset_id=ds.dataset_id).update(
+                    image_dir=f'st/{ds.dataset_id}'
+                )
+            return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+
+        # 兜底：hires.jpg 也不存在 → 从 h5ad 提图（自举路径）
         if not os.path.exists(cache_path):
             # 提取：从 h5ad 提图 → 存 media → 自愈写回 image_dir
             try:
                 import h5py
+                from PIL import Image
                 with h5py.File(ds.file_path, "r") as f:
                     if "uns/spatial" not in f:
                         return Response({'message': "No image for this dataset."}, status=404)
@@ -314,10 +347,7 @@ def getImg(request):
                                 if max_size:
                                     img.thumbnail((max_size, max_size), Image.LANCZOS)
                                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                                if save_format:
-                                    img.save(cache_path, save_format, **save_kwargs)
-                                else:
-                                    img.save(cache_path)
+                                img.save(cache_path, 'JPEG', **save_kwargs)
                                 if not ds.image_dir:
                                     # 首次提取：写回 image_dir，后续直读
                                     Dataset.objects.filter(dataset_id=ds.dataset_id).update(

@@ -1,10 +1,21 @@
 import os
 import h5py
 from PIL import Image
+from django.conf import settings
 from dataset.models import Dataset
 
 
+# 图片分辨率常量（可随时调整：getImg 校验到实际文件不符时自动按新值重建）
 MEDIUM_MAX_SIZE = 800
+THUMBNAIL_MAX_SIZE = 400
+
+# 图片规格表（单一来源）：resolution -> (文件名, 最大尺寸, 保存参数)
+# 供 getImg 与 Dataset._extract_images 共用；max_size=None 表示原尺寸（hires）
+IMAGE_RES_SPECS = {
+    'thumbnail': ('thumbnail.jpg', THUMBNAIL_MAX_SIZE, {'quality': 75, 'optimize': True}),
+    'medium': ('medium.jpg', MEDIUM_MAX_SIZE, {'quality': 80, 'optimize': True}),
+    'original': ('hires.jpg', None, {'quality': 85, 'optimize': True}),
+}
 
 
 def pil_image_from_array(arr):
@@ -51,30 +62,28 @@ def premultiply_coords(data, scalef):
 
 
 def extract_spatial_calibration(file_path):
-    """从 h5ad 提取空间校准的原始值：scalef_raw、源图尺寸、spot 直径。
+    """从 h5ad 提取空间校准的原始值。
 
-    返回 (scalef_raw, spot, img_w, img_h)：
-      - scalef_raw: 未乘 medium_ratio 的原始 scalef（hires→lowres 优先级解析后）
-      - img_w/img_h: 该源的图像尺寸（medium_ratio = min(800/w, 800/h) 读取时计算）
+    返回 (scalef_raw, spot)：
+      - scalef_raw: 未乘任何 ratio 的原始 scalef（hires→lowres 优先级解析后）
       - spot: spot_diameter_fullres
 
     与 getImg 的图像源优先级一致（hires → lowres），保证 scalef 匹配实际被服务的图。
+    medium 空间换算由 read_spatial_calibration 按实际文件尺寸实时计算（方案 B）。
     """
     if not file_path or not os.path.exists(file_path):
-        return None, None, None, None
+        return None, None
 
     scalef = None
     spot = None
-    img_w = None
-    img_h = None
     try:
         with h5py.File(file_path, 'r') as f:
             uns_spatial = f.get('uns/spatial')
             if uns_spatial is None:
-                return scalef, spot, img_w, img_h
+                return scalef, spot
             libs = list(uns_spatial.keys())
             if not libs:
-                return scalef, spot, img_w, img_h
+                return scalef, spot
 
             # 库选择：跳过标量标志位（如 is_single），取第一个含 images/scalefactors 的 Group
             lib = None
@@ -84,7 +93,7 @@ def extract_spatial_calibration(file_path):
                     lib = candidate
                     break
             if lib is None:
-                return scalef, spot, img_w, img_h
+                return scalef, spot
 
             spot_key = f'uns/spatial/{lib}/scalefactors/spot_diameter_fullres'
             if spot_key in f:
@@ -116,29 +125,32 @@ def extract_spatial_calibration(file_path):
                         except Exception:
                             pass
 
-                try:
-                    arr = f[img_path]
-                    img_h, img_w = arr.shape[0], arr.shape[1]
-                except Exception:
-                    pass
-
                 break  # First found image wins (hires -> lowres priority)
 
     except Exception as e:
         print(f'[extract_spatial_calibration] error for {file_path}: {e}')
 
-    return scalef, spot, img_w, img_h
+    return scalef, spot
+
+
+def _jpeg_dimensions(path):
+    """读 JPEG 头部尺寸（不解码像素），失败返回 (None, None)。"""
+    try:
+        with Image.open(path) as img:
+            return img.width, img.height
+    except Exception:
+        return None, None
 
 
 def read_spatial_calibration(dataset_id):
     """Read (tissue_hires_scalef, spot_diameter_fullres) for a dataset.
 
-    DB-first: scalef_raw/image_w/image_h/spot_diameter_fullres 由导入/backfill 时
-    提取入库，这里直接读库并计算 medium 空间 scalef（一次乘法，避免每次开 h5ad）。
+    DB-first: scalef_raw/spot_diameter_fullres 由导入/backfill 时提取入库。
+    medium 空间换算（方案 B）：ratio 按实际服务的 medium.jpg / hires.jpg 真实尺寸
+    计算（ratio = medium_w / hires_w），与 getImg 实际下发的图永远一致——
+    MEDIUM_MAX_SIZE 常量随时可变，图重建后 ratio 自动跟上，无错位窗口期。
 
     字段缺失（迁移前数据/新导入未 backfill）时自愈：从 h5ad 提取并写回数据库。
-
-    返回的 scalef 已调整到 medium 分辨率空间（MEDIUM_MAX_SIZE px，与 getImg 默认档一致）。
     """
     if not dataset_id:
         return None, None
@@ -149,20 +161,28 @@ def read_spatial_calibration(dataset_id):
 
     scalef_raw = ds.scalef_raw
     spot = ds.spot_diameter_fullres
-    img_w = ds.image_w
-    img_h = ds.image_h
 
-    if scalef_raw is None or not img_w or not img_h:
+    if scalef_raw is None:
         # 自愈：字段缺失 → 从 h5ad 提取并写回
-        scalef_raw, spot, img_w, img_h = extract_spatial_calibration(ds.file_path)
-        if scalef_raw is None or not img_w or not img_h:
-            return scalef_raw, spot
+        scalef_raw, spot = extract_spatial_calibration(ds.file_path)
+        if scalef_raw is None:
+            return None, None
         Dataset.objects.filter(dataset_id=dataset_id).update(
             scalef_raw=scalef_raw,
             spot_diameter_fullres=spot,
-            image_w=img_w,
-            image_h=img_h,
         )
 
-    medium_ratio = min(MEDIUM_MAX_SIZE / img_w, MEDIUM_MAX_SIZE / img_h)
+    # ratio 按实际文件尺寸（方案 B）；文件缺失时按 hires 实际长边 + 常量兜底
+    medium_path = os.path.join(settings.MEDIA_ROOT, ds.image_dir, 'medium.jpg')
+    hires_path = os.path.join(settings.MEDIA_ROOT, ds.image_dir, 'hires.jpg')
+    mw, _mh = _jpeg_dimensions(medium_path)
+    hw, hh = _jpeg_dimensions(hires_path)
+    if mw and hw:
+        medium_ratio = mw / hw
+    elif hw and hh:
+        # 兜底：medium.jpg 缺失时按 hires 实际长边 + 常量估算
+        medium_ratio = min(MEDIUM_MAX_SIZE / hw, MEDIUM_MAX_SIZE / hh)
+    else:
+        medium_ratio = 1.0
+
     return scalef_raw * medium_ratio, spot
