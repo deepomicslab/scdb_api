@@ -4,12 +4,19 @@ import json
 import time
 import subprocess
 from dataset.models import Dataset
-from task.apps import r_proxy
+from task.apps import get_r_proxy
 from utils.spatial_calibration import read_spatial_calibration, premultiply_coords
 
 
 class CellChatMixin:
     """CellChat cell-cell interaction result methods for Scstquery."""
+
+    def _get_cellchat_proxy(self):
+        """懒连接 R 服务；失败返回 None（调用方按 'not linked' 处理）。"""
+        try:
+            return get_r_proxy()
+        except Exception:
+            return None
 
     def run_cellchat_api(self, rds_path, method, signaling=None, lrpair=None, output_file=None):
         import time, os, subprocess, json
@@ -80,6 +87,7 @@ class CellChatMixin:
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
+        r_proxy = self._get_cellchat_proxy()
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
         try:
@@ -92,6 +100,7 @@ class CellChatMixin:
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
+        r_proxy = self._get_cellchat_proxy()
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
         try:
@@ -104,6 +113,7 @@ class CellChatMixin:
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
+        r_proxy = self._get_cellchat_proxy()
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
         scalef, spot = read_spatial_calibration(dataset)
@@ -124,6 +134,7 @@ class CellChatMixin:
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
+        r_proxy = self._get_cellchat_proxy()
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
         scalef, spot = read_spatial_calibration(dataset)
@@ -142,6 +153,7 @@ class CellChatMixin:
         rds_path = self._find_cellchat_rds(dataset, mapping_method)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
+        r_proxy = self._get_cellchat_proxy()
         if not r_proxy:
             return {'data': {}, 'status': 'error', 'message': "CellChat R Service not linked"}
         try:
