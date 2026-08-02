@@ -1,6 +1,34 @@
 import os
 import numpy as np
 import pandas as pd
+from collections import OrderedDict
+
+
+# gene_expression.csv 解析缓存：mtime 感知 + LRU 上限 2 个文件。
+# 408MB CSV 首读 ~20s；缓存建立后同一任务后续所有
+# markerGenes / markerGeneExpressions 请求直接命中（~0.1s）。
+_gene_expression_cache = OrderedDict()
+_GENE_EXPRESSION_CACHE_MAX = 2
+
+
+def _load_gene_expression(expression_file_path):
+    """读取 gene_expression.csv（mtime 感知缓存）。返回 DataFrame 或 None。"""
+    if not os.path.exists(expression_file_path):
+        return None
+    try:
+        mtime = os.path.getmtime(expression_file_path)
+    except OSError:
+        return None
+    cached = _gene_expression_cache.get(expression_file_path)
+    if cached and cached[0] == mtime:
+        _gene_expression_cache.move_to_end(expression_file_path)
+        return cached[1]
+    df = pd.read_csv(expression_file_path, index_col=0)
+    _gene_expression_cache[expression_file_path] = (mtime, df)
+    _gene_expression_cache.move_to_end(expression_file_path)
+    while len(_gene_expression_cache) > _GENE_EXPRESSION_CACHE_MAX:
+        _gene_expression_cache.popitem(last=False)
+    return df
 
 
 class HierarchicalClusteringMixin:
@@ -43,9 +71,9 @@ class HierarchicalClusteringMixin:
         subtask_he = self._resolve_subtask_he_path(dataset)
         base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
         expression_file_path = os.path.join(base, 'gene_expression.csv')
-        if not os.path.exists(expression_file_path):
+        expression_df = _load_gene_expression(expression_file_path)
+        if expression_df is None:
             return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
-        expression_df = pd.read_csv(expression_file_path, index_col=0)
         HierarchicalClustering_result_dir_path = os.path.join(base, 'HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
@@ -77,9 +105,9 @@ class HierarchicalClusteringMixin:
         subtask_he = self._resolve_subtask_he_path(dataset)
         base = subtask_he if subtask_he else os.path.join(self.path, 'result/he')
         expression_file_path = os.path.join(base, 'gene_expression.csv')
-        if not os.path.exists(expression_file_path):
+        expression_df = _load_gene_expression(expression_file_path)
+        if expression_df is None:
             return {'status': 'fail', 'message': f'File not found: {expression_file_path}'}
-        expression_df = pd.read_csv(expression_file_path, index_col=0)
         HierarchicalClustering_result_dir_path = os.path.join(base, 'HierarchicalClustering/')
         file_name = "cluster" + cluster.replace(" ", "_") + "_merged_data_with_labels.csv"
         cluster_file_path = os.path.join(HierarchicalClustering_result_dir_path, file_name)
