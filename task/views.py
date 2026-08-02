@@ -242,18 +242,24 @@ def taskresultview(request):
 # max-age=86400（1 天）：重导入数据集后旧图最多滞后 1 天（或用户强制刷新即失效）。
 _IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
 
+# resolution → MEDIA_ROOT/{image_dir}/ 下的文件名约定（与 Dataset._extract_images 一致）
+_IMG_RESOLUTION_FILES = {
+    'thumbnail': 'thumbnail.jpg',
+    'original': 'hires.jpg',
+    'medium': 'medium.jpg',
+}
+
 @api_view(['GET', 'HEAD'])
 def getImg(request):
     image_analysis_type = request.query_params.get('image_analysis_type')
     image_id = request.query_params.get('image_id')
-    # Optional resolution hint: 'thumbnail' returns a 500x500 max downscaled
-    # PNG (cached separately as _tissue_thumbnail.png). Default returns the
-    # full hires image (backwards compatible).
+    # Optional resolution hint: 'thumbnail' returns a 400x400 max downscaled
+    # JPEG (file name per _IMG_RESOLUTION_FILES under MEDIA_ROOT/{image_dir}).
+    # Default returns the full hires image (backwards compatible).
     resolution = request.query_params.get('resolution')
 
     if image_analysis_type == "he":
-        from dataset.models import Dataset
-        import h5py
+        from django.conf import settings
         from PIL import Image
 
         # Try dataset_id (UUID) first, then fall back to title
@@ -274,28 +280,28 @@ def getImg(request):
         #   medium    : 800x800 JPEG q80  (~50-100KB) — 散点图底图（默认）
         #   original  : 完整分辨率 JPEG q85 (~1MB)   — 高清 opt-in
         if resolution == 'thumbnail':
-            cache_path = ds.file_path.replace(".h5ad", "_tissue_thumbnail.jpg")
+            filename = _IMG_RESOLUTION_FILES['thumbnail']
             max_size = 400
-            content_type = 'image/jpeg'
-            save_format = 'JPEG'
             save_kwargs = {'quality': 75, 'optimize': True}
         elif resolution == 'original':
-            cache_path = ds.file_path.replace(".h5ad", "_tissue_hires.jpg")
+            filename = _IMG_RESOLUTION_FILES['original']
             max_size = None  # 完整分辨率
-            content_type = 'image/jpeg'
-            save_format = 'JPEG'
             save_kwargs = {'quality': 85, 'optimize': True}
         else:
             # 默认（无 param 或 ?resolution=medium）：medium
-            cache_path = ds.file_path.replace(".h5ad", "_tissue_medium.jpg")
+            filename = _IMG_RESOLUTION_FILES['medium']
             max_size = MEDIUM_MAX_SIZE
-            content_type = 'image/jpeg'
-            save_format = 'JPEG'
             save_kwargs = {'quality': 80, 'optimize': True}
+        content_type = 'image/jpeg'
+        save_format = 'JPEG'
+
+        image_dir = ds.image_dir or f'st/{ds.dataset_id}'
+        cache_path = os.path.join(settings.MEDIA_ROOT, image_dir, filename)
 
         if not os.path.exists(cache_path):
-            # Try to extract from h5ad
+            # 提取：从 h5ad 提图 → 存 media → 自愈写回 image_dir
             try:
+                import h5py
                 with h5py.File(ds.file_path, "r") as f:
                     if "uns/spatial" not in f:
                         return Response({'message': "No image for this dataset."}, status=404)
@@ -306,10 +312,16 @@ def getImg(request):
                                 img = Image.fromarray(f[img_full][:])
                                 if max_size:
                                     img.thumbnail((max_size, max_size), Image.LANCZOS)
+                                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                                 if save_format:
                                     img.save(cache_path, save_format, **save_kwargs)
                                 else:
                                     img.save(cache_path)
+                                if not ds.image_dir:
+                                    # 首次提取：写回 image_dir，后续直读
+                                    Dataset.objects.filter(dataset_id=ds.dataset_id).update(
+                                        image_dir=f'st/{ds.dataset_id}'
+                                    )
                                 return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
             except Exception as e:
                 print(f"[getImg] error extracting image for {image_id}: {e}")
