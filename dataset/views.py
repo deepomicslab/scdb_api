@@ -4,10 +4,10 @@ from django.http import FileResponse
 from django.db.models import Count, Sum, Q
 import os
 import time
+import h5py
 import numpy as np
 import pandas as pd
 from collections import Counter
-import scanpy as sc
 
 from .models import Dataset, GlobalStat
 from utils.spatial_calibration import read_spatial_calibration
@@ -173,6 +173,35 @@ def _scatter_first_truthy(df, cols):
     return s.fillna('Unknown')
 
 
+def _h5ad_obs_cols(f, target_cols):
+    """h5py 直读 h5ad /obs 指定列（绕开 scanpy 全量加载 uns 图片，首次提速）。
+
+    categorical 列在 h5ad 中为 Group（codes + categories），字符串/数值列为 Dataset。
+    """
+    obs = f['obs']
+    data = {}
+    for col in target_cols:
+        if col not in obs:
+            continue
+        obj = obs[col]
+        if isinstance(obj, h5py.Group):
+            codes = np.asarray(obj['codes'][:])
+            categories = np.asarray(obj['categories'][:])
+            if categories.dtype.kind == 'S':
+                categories = np.array([c.decode('utf-8', 'replace') for c in categories])
+            vals = np.empty(len(codes), dtype=object)
+            vals[:] = 'Unknown'
+            mask = (codes >= 0) & (codes < len(categories))
+            vals[mask] = categories[codes[mask]]
+            data[col] = vals
+        else:
+            v = np.asarray(obj[:])
+            if v.dtype.kind == 'S':
+                v = np.array([x.decode('utf-8', 'replace') for x in v])
+            data[col] = v
+    return data
+
+
 @api_view(['GET'])
 def detail_scatter(request, dataset_id):
     try:
@@ -187,40 +216,37 @@ def detail_scatter(request, dataset_id):
         if not os.path.exists(file_path):
             return Response({'status': 'error', 'message': 'File not found'}, status=404)
 
-        adata = sc.read_h5ad(file_path, backed='r')
-        
-        coords = None
-        coord_type = 'spatial'
-        if 'spatial' in adata.obsm.keys():
-            coords = adata.obsm['spatial']
-        elif 'X_spatial' in adata.obsm.keys():
-            coords = adata.obsm['X_spatial']
-        elif 'X_umap' in adata.obsm.keys():
-            coords = adata.obsm['X_umap']
-            coord_type = 'umap'
-            
-        if coords is None:
-            return Response({'status': 'error', 'message': 'No coordinates found'}, status=500)
-
-        tissue_hires_scalef = None
-        spot_diameter_fullres = None
-        if coord_type == 'spatial' and 'spatial' in adata.uns:
-            tissue_hires_scalef, spot_diameter_fullres = read_spatial_calibration(dataset_id)
-
         target_cols = ['cell_type', 'annotation', 'Label', 'donor', 'donor_id', 'tissue']
-        available_cols = [c for c in target_cols if c in adata.obs.columns]
-        df = adata.obs[available_cols].copy()
+        with h5py.File(file_path, 'r') as f:
+            obsm_keys = list(f['obsm'].keys())
+            coords = None
+            coord_type = 'spatial'
+            for k in ('spatial', 'X_spatial', 'X_umap'):
+                if k in f['obsm']:
+                    coords = np.asarray(f['obsm'][k][:])
+                    if k == 'X_umap':
+                        coord_type = 'umap'
+                    break
 
+            if coords is None:
+                return Response({'status': 'error', 'message': 'No coordinates found'}, status=500)
+
+            tissue_hires_scalef = None
+            spot_diameter_fullres = None
+            if coord_type == 'spatial' and 'spatial' in f['uns']:
+                tissue_hires_scalef, spot_diameter_fullres = read_spatial_calibration(dataset_id)
+
+            obs_data = _h5ad_obs_cols(f, target_cols)
+            index = np.asarray(f['obs']['_index'][:])
+            if index.dtype.kind == 'S':
+                index = np.array([x.decode('utf-8', 'replace') for x in index])
+            df = pd.DataFrame(obs_data, index=index.astype(str))
+
+        available_cols = [c for c in target_cols if c in df.columns]
         for col in df.columns:
-            if pd.api.types.is_categorical_dtype(df[col]):
-                df[col] = df[col].astype(str)
             df[col] = df[col].fillna('Unknown')
         if available_cols:
             df[available_cols] = df[available_cols].astype(str)
-
-        if hasattr(coords, 'to_numpy'):
-            coords = coords.to_numpy()
-        coords = np.asarray(coords)
 
         if 'Label' in df.columns:
             label_series = df['Label']
