@@ -238,6 +238,10 @@ def taskresultview(request):
     return Response(res)
 
 
+# getImg 浏览器缓存：URL 按 dataset_id/resolution 稳定，图片内容在数据集重导入前不变。
+# max-age=86400（1 天）：重导入数据集后旧图最多滞后 1 天（或用户强制刷新即失效）。
+_IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
+
 @api_view(['GET', 'HEAD'])
 def getImg(request):
     image_analysis_type = request.query_params.get('image_analysis_type')
@@ -306,12 +310,12 @@ def getImg(request):
                                     img.save(cache_path, save_format, **save_kwargs)
                                 else:
                                     img.save(cache_path)
-                                return FileResponse(open(cache_path, 'rb'), content_type=content_type)
+                                return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
             except Exception as e:
                 print(f"[getImg] error extracting image for {image_id}: {e}")
             return Response({'message': "No image for this dataset."}, status=404)
 
-        return FileResponse(open(cache_path, 'rb'), content_type=content_type)
+        return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
     else:
         return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
     
