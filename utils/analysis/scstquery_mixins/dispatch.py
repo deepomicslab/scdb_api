@@ -9,6 +9,7 @@ _RESULT_DISPATCH = {
     'scstmappingDownload': ('_scstmapping_resolve_file', ['dataset', 'method'], {}, False),
     'download': ('download', ['filename'], {}, False),
     'hescatter': ('getHEScatterresult', ['dataset'], {}, False),
+    'he_distribution': ('getHEClusterDistribution', ['dataset'], {}, False),
     'countHeatmap': ('getQueryCountHeatmapResult', ['dataset'], {}, False),
     'hierarchicalClusteringStatus': ('getHierarchicalClusteringStatus', [], {}, False),
     'hierarchicalclusteringCelltypes': ('getHierarchicalClusteringQueryCelltypes', ['dataset'], {}, False),
