@@ -2,10 +2,38 @@ import os
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from collections import OrderedDict
 from scipy import sparse
 from dataset.models import Dataset
 from utils.spatial_calibration import read_spatial_calibration
 from scdb_api import settings_local as local_settings
+
+
+# adata_spider.h5ad 句柄缓存：mtime 感知 + LRU 上限 3 个文件。
+# backed 打开 ~0.9s（828MB 文件），句柄命中后 pattern/lr/init 只剩读取开销
+# （~0.04s）；"Load All LR Pairs" 串行 N 个请求省掉 N 次打开。重跑覆盖自动失效。
+_spider_adata_cache = OrderedDict()
+_SPIDER_ADATA_CACHE_MAX = 3
+
+
+def _load_spider_adata(file_path):
+    """backed 打开 adata_spider.h5ad（mtime 感知缓存）。返回 AnnData 或 None。"""
+    if not os.path.exists(file_path):
+        return None
+    try:
+        mtime = os.path.getmtime(file_path)
+    except OSError:
+        return None
+    cached = _spider_adata_cache.get(file_path)
+    if cached and cached[0] == mtime:
+        _spider_adata_cache.move_to_end(file_path)
+        return cached[1]
+    adata = sc.read_h5ad(file_path, backed='r')
+    _spider_adata_cache[file_path] = (mtime, adata)
+    _spider_adata_cache.move_to_end(file_path)
+    while len(_spider_adata_cache) > _SPIDER_ADATA_CACHE_MAX:
+        _spider_adata_cache.popitem(last=False)
+    return adata
 
 
 class SpiderMixin:
@@ -137,7 +165,9 @@ class SpiderMixin:
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
         try:
-            adata = sc.read_h5ad(h5ad_path, backed='r')
+            adata = _load_spider_adata(h5ad_path)
+            if adata is None:
+                return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
             metadata = []
             if 'pattern_score' in adata.obsm.keys():
                 n_patterns = adata.obsm['pattern_score'].shape[1]
@@ -176,7 +206,9 @@ class SpiderMixin:
             if pattern_id is None:
                 raise ValueError("Pattern ID is required")
             pid = int(pattern_id)
-            adata = sc.read_h5ad(h5ad_path, backed='r')
+            adata = _load_spider_adata(h5ad_path)
+            if adata is None:
+                return {'data': [], 'status': 'error', 'message': f'File not found: {h5ad_path}'}
             if 'pattern_score' not in adata.obsm.keys():
                 raise ValueError("pattern_score not found in data")
             scores = adata.obsm['pattern_score'][:, pid]
@@ -189,7 +221,9 @@ class SpiderMixin:
         try:
             if not lr_name:
                 raise ValueError("LR Name is required")
-            adata = sc.read_h5ad(h5ad_path, backed='r')
+            adata = _load_spider_adata(h5ad_path)
+            if adata is None:
+                return {'data': [], 'status': 'error', 'message': f'File not found: {h5ad_path}'}
             if lr_name not in adata.var_names:
                 return {'data': [], 'status': 'error', 'message': f'LR pair {lr_name} not found'}
             data_col = adata[:, lr_name].X
