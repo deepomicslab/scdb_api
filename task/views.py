@@ -243,6 +243,17 @@ def taskresultview(request):
 _IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
 
 
+def _img_file_response(path, content_type):
+    """图片 FileResponse：显式 Content-Encoding: identity 让 GZipMiddleware 跳过。
+
+    JPEG 已压缩，流式 gzip 白耗 CPU 且不减大小；identity 头是 Django 官方
+    让 GZipMiddleware 跳过的机制（已有 Content-Encoding 的响应不再压缩）。
+    """
+    resp = FileResponse(open(path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+    resp['Content-Encoding'] = 'identity'
+    return resp
+
+
 def _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
     """确保目标分辨率图片存在且符合当前尺寸常量，不符则从 hires.jpg 压缩重建。
 
@@ -328,7 +339,7 @@ def getImg(request):
                 Dataset.objects.filter(dataset_id=ds.dataset_id).update(
                     image_dir=f'st/{ds.dataset_id}'
                 )
-            return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+            return _img_file_response(cache_path, content_type)
 
         # 兜底：hires.jpg 也不存在 → 从 h5ad 提图（自举路径）
         if not os.path.exists(cache_path):
@@ -353,12 +364,12 @@ def getImg(request):
                                     Dataset.objects.filter(dataset_id=ds.dataset_id).update(
                                         image_dir=f'st/{ds.dataset_id}'
                                     )
-                                return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+                                return _img_file_response(cache_path, content_type)
             except Exception as e:
                 print(f"[getImg] error extracting image for {image_id}: {e}")
             return Response({'message': "No image for this dataset."}, status=404)
 
-        return FileResponse(open(cache_path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+        return _img_file_response(cache_path, content_type)
     else:
         return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
     

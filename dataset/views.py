@@ -299,6 +299,8 @@ def download_h5ad(request, dataset_id):
         # FileResponse 会自动关闭文件，并处理 Content-Length 等头信息
         file_handle = open(file_path, 'rb')
         response = FileResponse(file_handle)
+        # GB 级 h5ad 流式 gzip 会打爆 CPU——显式 identity 让 GZipMiddleware 跳过
+        response['Content-Encoding'] = 'identity'
         
         # 设置下载的文件名 (浏览器下载时显示的名字)
         # 这里默认用 {dataset_id}.h5ad
