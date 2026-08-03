@@ -161,6 +161,11 @@ class SpiderMixin:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
     def getSpiderInit(self, dataset=None, mapping_method=None):
+        """轻量元信息：pattern 列表 + 每 pattern 的 top10 LR + 校准值（不含 coordinates）。
+
+        coordinates 单独由 getSpiderCoords 提供——前端打开面板先秒出菜单，
+        坐标后台并行拉取，避免 2MB JSON 阻塞首屏。
+        """
         h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
@@ -183,6 +188,23 @@ class SpiderMixin:
                             score = row.get(corr_col, 0)
                             pattern_item['svis'].append({"name": lr_name, "score": round(float(score), 3)})
                     metadata.append(pattern_item)
+            scalef, spot = read_spatial_calibration(dataset)
+            return {'data': {'metadata': metadata, 'tissue_hires_scalef': scalef, 'spot_diameter_fullres': spot}, 'status': 'success'}
+        except Exception as e:
+            return {'data': {}, 'status': 'error', 'message': str(e)}
+
+    def getSpiderCoords(self, dataset=None, mapping_method=None):
+        """全量坐标基底（12379 点 {id, x, y}，x/y 已预乘 scalef）+ 校准值。
+
+        前端选 pattern 前一次性拉取并缓存，后续 pattern/lr 只传 values。
+        """
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
+        if not os.path.exists(h5ad_path):
+            return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
+        try:
+            adata = _load_spider_adata(h5ad_path)
+            if adata is None:
+                return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
             coordinates = []
             scalef, spot = read_spatial_calibration(dataset)
             if 'spatial' in adata.obsm.keys():
@@ -196,7 +218,7 @@ class SpiderMixin:
                 cols = adata.obs['col'].values
                 obs_names = adata.obs_names
                 coordinates = [{"id": name, "x": float(r), "y": float(c)} for name, r, c in zip(obs_names, rows, cols)]
-            return {'data': {'metadata': metadata, 'coordinates': coordinates, 'tissue_hires_scalef': scalef, 'spot_diameter_fullres': spot}, 'status': 'success'}
+            return {'data': {'coordinates': coordinates, 'tissue_hires_scalef': scalef, 'spot_diameter_fullres': spot}, 'status': 'success'}
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 

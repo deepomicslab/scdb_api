@@ -25,6 +25,7 @@ _RESULT_DISPATCH = {
     'cellchat_heatmap': ('getCellChatHeatmapData', ['LR_pair', 'dataset', 'mapping_method'], {}, False),
     'cellchat_lrpairs': ('getCellChatLRPairs', ['dataset', 'mapping_method'], {}, False),
     'spider_init': ('getSpiderInit', ['dataset', 'mapping_method'], {}, False),
+    'spider_coords': ('getSpiderCoords', ['dataset', 'mapping_method'], {}, False),
     'spider_pattern': ('getSpiderPatternData', ['dataset', 'pattern_id', 'mapping_method'], {}, False),
     'spider_lr': ('getSpiderLRData', ['dataset', 'lr_name', 'mapping_method'], {}, False),
     'lr_spearman': ('getLRSpearmanData', ['dataset', 'mapping_method'], {}, False),
