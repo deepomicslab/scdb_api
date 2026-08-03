@@ -1,7 +1,37 @@
 import os
 import pickle
 import pandas as pd
+from collections import OrderedDict
 from dataset.models import Dataset
+
+
+# cci_result.pkl 解析缓存：mtime 感知 + LRU 上限 2 个文件。
+# pickle.load 全量 4.9MB ~0.3s，命中后筛选/排序/分页/metadata 全走内存 df（~ms）。
+# 重跑覆盖 pkl 自动失效。缓存 df 只读（筛选/排序均返回新对象，不原地修改）。
+_alphatalk_df_cache = OrderedDict()
+_ALPHATALK_CACHE_MAX = 2
+
+
+def _load_alphatalk_df(pkl_path):
+    """读取 cci_result.pkl 的 lr_score DataFrame（mtime 感知缓存）。"""
+    try:
+        mtime = os.path.getmtime(pkl_path)
+    except OSError:
+        return None
+    cached = _alphatalk_df_cache.get(pkl_path)
+    if cached and cached[0] == mtime:
+        _alphatalk_df_cache.move_to_end(pkl_path)
+        return cached[1]
+    with open(pkl_path, 'rb') as f:
+        result_obj = pickle.load(f)
+    if 'lr_score' not in result_obj:
+        return None
+    df = result_obj['lr_score']
+    _alphatalk_df_cache[pkl_path] = (mtime, df)
+    _alphatalk_df_cache.move_to_end(pkl_path)
+    while len(_alphatalk_df_cache) > _ALPHATALK_CACHE_MAX:
+        _alphatalk_df_cache.popitem(last=False)
+    return df
 
 
 class AlphaTalkMixin:
@@ -40,13 +70,10 @@ class AlphaTalkMixin:
             if not os.path.exists(pkl_path):
                 return {'data': [], 'total': 0, 'status': 'error', 'message': "File not found"}
 
-            with open(pkl_path, 'rb') as f:
-                result_obj = pickle.load(f)
+            df = _load_alphatalk_df(pkl_path)
 
-            if 'lr_score' not in result_obj:
+            if df is None:
                 return {'data': [], 'total': 0, 'status': 'error', 'message': "Invalid data format"}
-            
-            df = result_obj['lr_score']
 
             if df.empty:
                 return {'data': [], 'total': 0, 'status': 'success', 'message': "Empty result"}
@@ -116,7 +143,7 @@ class AlphaTalkMixin:
             numeric_cols = ['score', 'lr_score', 'rt_score', 'co_exp_p', 'co_exp_value']
             for col in numeric_cols:
                 if col in df_page.columns:
-                    df_page[col] = df_page[col].apply(lambda x: round(float(x), 4) if x is not None else 0)
+                    df_page[col] = df_page[col].apply(lambda x: x if x is None else round(float(x), 4))
 
             return {
                 'data': df_page.to_dict(orient='records'),
