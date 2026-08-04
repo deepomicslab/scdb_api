@@ -158,9 +158,7 @@ def taskdetailview(request):
         return Response({'status': 'error', 'message': 'Task not found'}, status=404)
     serializer = taskSerializer(taskobject, many=True)
     taskdata=serializer.data[0]
-    taskdata['inputpath'] =   local_settings.FILEAPI+taskdata['userpath']+ '/upload/input.csv'
-    taskdata['outputpath'] =  {'metadata':local_settings.FILEAPI+taskdata['userpath']+ '/result/scquery/sc_output_meta.csv',\
-                            'expression':local_settings.FILEAPI+taskdata['userpath']+ '/result/scquery/sc_output_expression.csv'}
+    # 不再下发 userpath / inputpath / outputpath（含服务器工作区路径）
     return Response({'results': taskdata})
 
 @api_view(['GET'])
@@ -379,18 +377,20 @@ def create_subtask(request):
     创建 scst 子任务
     - taskid (主任务 ID)
     - userid
-    - dataset_path (数据集 ID)
+    - dataset_id (数据集 ID，如 Kidney_Cancer_001)
     - subtasktype (子任务类型)
     - parameters (JSON 字符串)
+
+    注意：不再接收客户端传来的服务器路径（dataset_path），
+    需要 marker 路径时由服务端按 dataset_id 反查，避免路径泄露/注入。
     """
     taskid = request.data.get('taskid')
     userid = request.data.get('userid')
-    dataset_path = request.data.get('dataset_path')
     dataset_id = request.data.get('dataset_id', '')
     subtasktype = request.data.get('subtasktype')
 
-    if not taskid or not userid or not dataset_path or not subtasktype:
-        return Response({'status': 'Failed', 'message': '缺少 taskid、userid、dataset_path 或 subtasktype'}, status=400)
+    if not taskid or not userid or not dataset_id or not subtasktype:
+        return Response({'status': 'Failed', 'message': '缺少 taskid、userid、dataset_id 或 subtasktype'}, status=400)
 
     try:
         main_task = tasks.objects.get(id=taskid, user=userid)
@@ -406,7 +406,7 @@ def create_subtask(request):
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
     try:
-        result = create_subtask_service(main_task, userid, dataset_path, dataset_id, subtasktype, parameters_dict)
+        result = create_subtask_service(main_task, userid, dataset_id, subtasktype, parameters_dict)
         return Response(result)
     except ValueError as e:
         traceback.print_exc()

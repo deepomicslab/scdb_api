@@ -242,10 +242,12 @@ class SubScstquery(Module):
 
     def _check_running_cellchat(self):
         from django.db.models import Q
+        # SubTask.dataset_path 存的是 dataset_id（见 services.create_subtask），
+        # 故按 params 里的 dataset_id 过滤，而非 marker 路径
         running = SubTask.objects.filter(
             main_task__userpath=self.user_main_dir.replace(local_settings.USERTASKPATH, ''),
             subtask_type='cellchat',
-            dataset_path=self._dataset_path,
+            dataset_path=self.params.get('dataset_id', ''),
         ).filter(
             Q(status__iexact='created') | Q(status__iexact='pending') | Q(status__iexact='running')
         ).first()

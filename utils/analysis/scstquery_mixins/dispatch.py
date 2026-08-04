@@ -4,7 +4,7 @@ from scdb_api import settings_local as local_settings
 _RESULT_DISPATCH = {
     'metadata': ('getmetaresult', ['page', 'pagesize'], {}, True),
     'organsanddatasets': ('getOrgansAndDatasets', [], {}, False),
-    'datasetInfo': ('getDatasetInfo', ['datasetPath'], {}, False),
+    'datasetInfo': ('getDatasetInfo', ['dataset'], {}, False),
     'filelist': ('getdownloadfilelist', ['flag'], {}, False),
     'scstmappingDownload': ('_scstmapping_resolve_file', ['dataset', 'method'], {}, False),
     'download': ('download', ['filename'], {}, False),
@@ -19,7 +19,6 @@ _RESULT_DISPATCH = {
     'LRPairs': ('getLRPairs', ['dataset', 'mapping_method'], {}, False),
     'LRreceivedSignalStrength': ('getReceivedSignalStrength', ['dataset', 'lr_pair', 'mapping_method'], {}, False),
     'networkData': ('getNetworkData', ['dataset', 'type', 'mapping_method'], {}, False),
-    'img_path': ('getImgpath', ['analysis_type', 'img_id'], {}, False),
     'cellchat_pathways': ('getCellChatPathways', ['dataset', 'mapping_method'], {}, False),
     'cellchat_circle': ('getCellChatCircleData', ['pathway', 'dataset', 'mapping_method'], {}, False),
     'cellchat_spatial': ('getCellChatSpatialData', ['pathway', 'dataset', 'mapping_method'], {}, False),

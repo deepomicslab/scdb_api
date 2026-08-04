@@ -80,14 +80,18 @@ def _chain_prerequisite(cls, prereq_type, usertask_dir, dataset_uuid,
     return prereq_module, prereq_job_id, prereq_subtask
 
 
-def create_subtask(main_task, userid, dataset_path, dataset_id, subtasktype, parameters_dict):
+def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     """Create and submit a subtask.
 
-    Returns dict: {'status', 'message', 'data': {'subtaskid', 'sub_dir'}}
+    服务端按 dataset_id 反查 marker 路径，不再接收客户端传来的服务器路径。
+    Returns dict: {'status', 'message', 'data': {'subtaskid'}}
     Raises ValueError for validation failures.
     """
+    from utils.analysis.base import resolve_marker_path
+
     usertask_dir = main_task.userpath
     parameters_dict['userid'] = userid
+    parameters_dict['dataset_id'] = dataset_id
     if 'projectname' not in parameters_dict:
         parameters_dict['projectname'] = 'test'
 
@@ -115,15 +119,29 @@ def create_subtask(main_task, userid, dataset_path, dataset_id, subtasktype, par
         except Dataset.DoesNotExist:
             pass
 
+    # Resolve marker CSV path server-side (only types that feed it to SLURM
+    # scripts require it; annotation_mapping/recall_analysis need it via
+    # their auto-chained he_scatter/hierarchical_clustering prerequisite).
+    dataset_path = resolve_marker_path(usertask_dir, dataset_id) if dataset_id else None
+    PATH_REQUIRED_TYPES = ('he_scatter', 'hierarchical_clustering',
+                           'annotation_mapping', 'recall_analysis')
+    if subtasktype in PATH_REQUIRED_TYPES and not dataset_path:
+        new_subtask.status = TaskStatus.FAILED
+        new_subtask.save()
+        raise ValueError(
+            f"Cannot resolve marker path for dataset {dataset_id}; "
+            "has the main SC-ST query finished?"
+        )
+
     new_submodule = cls(subtasktype, usertask_dir, dataset_uuid,
-                        dataset_path, st_h5ad_path, parameters_dict)
+                        dataset_path or '', st_h5ad_path, parameters_dict)
 
     # Auto-chain prerequisites (HC for recall_analysis, HE for annotation_mapping)
     chain_config = PREREQUISITE_CHAIN.get(subtasktype)
     if chain_config:
         result = _chain_prerequisite(
             cls, chain_config['prereq_type'], usertask_dir, dataset_uuid,
-            dataset_path, st_h5ad_path, parameters_dict, main_task, dataset_id
+            dataset_path or '', st_h5ad_path, parameters_dict, main_task, dataset_id
         )
         if result[0]:  # prereq_module
             prereq_module, prereq_job_id, prereq_subtask = result
@@ -153,5 +171,5 @@ def create_subtask(main_task, userid, dataset_path, dataset_id, subtasktype, par
     return {
         'status': 'Success',
         'message': '子任务创建成功',
-        'data': {'subtaskid': new_subtask.id, 'sub_dir': new_submodule.path},
+        'data': {'subtaskid': new_subtask.id},
     }

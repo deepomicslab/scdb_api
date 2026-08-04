@@ -74,7 +74,6 @@ class CommonMixin:
                         "disease": db_obj.disease,
                         "n_spots": db_obj.n_spots,
                         "organ": db_obj.organ,
-                        "h5ad_path": db_obj.file_path
                     }
                 else:
                     new_key = extracted_uuid if extracted_uuid else os.path.basename(original_path)
@@ -82,7 +81,8 @@ class CommonMixin:
                     meta_info = {"uuid": extracted_uuid}
 
                 new_value = scores.copy()
-                new_value['marker_path'] = original_path
+                # 注意：不要把服务器路径（original_path / file_path）下发给前端，
+                # 前端只使用 dataset_id；需要路径时由后端 resolve_marker_path 反查。
                 new_value['title'] = new_key
                 new_value['description'] = description
                 new_value['meta'] = meta_info
@@ -98,8 +98,18 @@ class CommonMixin:
             'data': transformed_data
         }
     
-    def getDatasetInfo(self, datasetPath):
+    def getDatasetInfo(self, dataset):
         from pathlib import Path
+        from utils.analysis.base import resolve_marker_path
+
+        # 前端只传 dataset_id，服务器路径由后端反查，绝不下发/接收客户端路径
+        task_dir = self.path.replace(local_settings.USERTASKPATH, '')
+        datasetPath = resolve_marker_path(task_dir, dataset)
+        if not datasetPath or not os.path.exists(datasetPath):
+            return {
+                'status': 'fail',
+                'message': f'Cannot resolve marker path for dataset {dataset}'
+            }
 
         dataset_marker_df = pd.read_csv(datasetPath)
         num_rows_marker, num_columns_marker = dataset_marker_df.shape
@@ -195,29 +205,3 @@ class CommonMixin:
             return res
         res = {'filelist': filelist, 'flag': flag, 'status': 'success'}
         return res
-    
-    def getImgpath(self, analysis_type, image_ID):
-        if analysis_type == "he":
-            dataset_id = image_ID
-            try:
-                from dataset.models import Dataset
-                import h5py
-                ds = Dataset.objects.get(dataset_id=dataset_id)
-                png_path = ds.file_path.replace(".h5ad", "_tissue_hires.png")
-                if not os.path.exists(png_path):
-                    with h5py.File(ds.file_path, "r") as f:
-                        if "uns/spatial" not in f:
-                            return ""
-                        for lib in f["uns/spatial"].keys():
-                            for img_key in ("hires", "lowres"):
-                                img_full = f"uns/spatial/{lib}/images/{img_key}"
-                                if img_full in f:
-                                    from PIL import Image
-                                    Image.fromarray(f[img_full][:]).save(png_path)
-                                    return png_path
-                    return ""
-                return png_path
-            except Exception as e:
-                print(f"[tissue_image] error for {dataset_id}: {e}")
-                return ""
-        return ""

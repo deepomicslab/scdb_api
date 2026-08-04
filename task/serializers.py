@@ -17,7 +17,8 @@ class taskSerializer(serializers.ModelSerializer):
     # subtasks = serializers.SerializerMethodField()
     class Meta:
         model = tasks
-        fields = ['id','name', 'user', 'userpath', 'task_type', 'modulelist', 'status', 'created_at']
+        # userpath 含服务器工作区路径，不下发给前端
+        fields = ['id','name', 'user', 'task_type', 'modulelist', 'status', 'created_at']
     
     # def get_subtasks(self, obj):
     #     return [{'id': st.id, 'subtask_type': st.subtask_type, 'dataset_id': st.dataset_id, 'status': st.status} for st in obj.subtasks.all()]

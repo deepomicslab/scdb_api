@@ -1,10 +1,53 @@
 import os
+import json
 from utils import slurm_api
 from utils.slurm_api import normalize_slurm_status
 from scdb_api import settings_local as local_settings
 from utils.mapping_paths import list_completed_methods, resolve_mapping_output_path
 from task.models import TaskStatus
 from dataset.models import Dataset
+
+
+def extract_dataset_uuid(dataset_path):
+    """Extract UUID from dataset_path (format: .../<uuid>/st_marker/...).
+    Returns None if parsing fails."""
+    parts = dataset_path.split('/')
+    for i, p in enumerate(parts):
+        if p == 'st_marker' and i > 1:
+            return parts[i - 1]
+    return None
+
+
+def resolve_marker_path(task_dir, dataset_id):
+    """Resolve a dataset's marker CSV path on the server side.
+
+    Server paths must never reach the browser, so the frontend only passes
+    dataset_id and the backend recovers the marker path here: read the keys of
+    result/sc_query/result_scores.json (marker paths written by the main
+    pipeline) and match via     dataset_id -> Dataset.title (uuid).
+    Returns the path string, or None when unresolvable.
+    """
+    try:
+        uuid = Dataset.objects.get(dataset_id=dataset_id).title
+    except Dataset.DoesNotExist:
+        return None
+    scores_path = os.path.join(
+        local_settings.USERTASKPATH + task_dir, 'result/sc_query/result_scores.json'
+    )
+    if not os.path.exists(scores_path):
+        return None
+    try:
+        with open(scores_path, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+    except Exception:
+        return None
+    for organ_datasets in raw_data.values():
+        if not isinstance(organ_datasets, dict):
+            continue
+        for original_path in organ_datasets.keys():
+            if extract_dataset_uuid(original_path) == uuid:
+                return original_path
+    return None
 
 
 class Module:
@@ -108,13 +151,9 @@ class Module:
             return {'completed_methods': [], 'running_methods': [], 'failed_methods': [], 'status': 'error', 'message': str(e)}
 
     def _extract_dataset_uuid(self, dataset_path):
-        """Extract UUID from dataset_path (format: .../st_marker/<uuid>/...).
+        """Extract UUID from dataset_path (format: .../<uuid>/st_marker/...).
         Returns None if parsing fails."""
-        parts = dataset_path.split('/')
-        for i, p in enumerate(parts):
-            if p == 'st_marker' and i > 1:
-                return parts[i - 1]
-        return None
+        return extract_dataset_uuid(dataset_path)
 
     def _scstmapping_resolve_file(self, dataset_id, method):
         """Resolve mapping result h5ad path for streaming download.
