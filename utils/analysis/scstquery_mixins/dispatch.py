@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from scdb_api import settings_local as local_settings
 
@@ -94,5 +95,7 @@ class DispatchMixin:
 
     def _fallback_csv(self):
         expressionfile = self.path + '/result/scquery/sc_output_expression.csv'
+        if not os.path.exists(expressionfile):
+            return {'status': 'fail', 'message': 'Unknown or unsupported resulttype'}
         expression = pd.read_csv(expressionfile, index_col=0)
         return {'results': expression.to_dict(orient='records')}
