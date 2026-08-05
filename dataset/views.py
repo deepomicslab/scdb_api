@@ -339,24 +339,58 @@ def _h5ad_str_array(arr):
     return a.astype(str)
 
 
+def _var_col_values(f, col):
+    """读 var 列的值（支持 categorical Group / Dataset），返回 str 数组。"""
+    obj = f['var'][col]
+    if isinstance(obj, h5py.Group):
+        codes = np.asarray(obj['codes'][:])
+        categories = _h5ad_str_array(obj['categories'][:])
+        vals = np.array(
+            [categories[int(c)] if 0 <= int(c) < len(categories) else '' for c in codes],
+            dtype=object,
+        )
+        return vals.astype(str)
+    return _h5ad_str_array(obj[:])
+
+
+def _strip_ensembl_suffix(names):
+    """feature_name 形如 'A1BG_ENSG00000121410' -> 'A1BG'；无 _ENSG 后缀原样返回。"""
+    cleaned = np.empty(len(names), dtype=object)
+    for i, n in enumerate(names):
+        if '_ENSG' in n:
+            cleaned[i] = n.split('_ENSG')[0]
+        else:
+            cleaned[i] = n
+    return cleaned.astype(str)
+
+
 def _find_gene_col(f, gene):
-    """在 var 中定位基因列。依次尝试 index 列 / gene_symbols / gene_ids，
-    先精确匹配再忽略大小写。返回 (列号, 匹配来源) 或 (None, None)。"""
+    """在 var 中定位基因列。依次尝试 index 列 / gene_symbols / gene_ids / feature_name，
+    先精确匹配再忽略大小写；feature_name 额外剥离 '_ENSG' 后缀（CELLxGENE 拼接格式）。
+    返回 (列号, 匹配来源) 或 (None, None)。"""
     index_col = _h5ad_attr_str(f['var'].attrs, '_index', '_index')
     candidates = [index_col] if index_col in f['var'] else []
-    for extra in ('gene_symbols', 'gene_ids'):
+    for extra in ('gene_symbols', 'gene_ids', 'feature_name'):
         if extra in f['var'] and extra not in candidates:
             candidates.append(extra)
 
     gene_lower = gene.lower()
     for cand in candidates:
-        names = _h5ad_str_array(f['var'][cand][:])
+        names = _var_col_values(f, cand)
         hits = np.where(names == gene)[0]
         if hits.size:
             return int(hits[0]), cand
         hits = np.where(np.char.lower(names) == gene_lower)[0]
         if hits.size:
             return int(hits[0]), cand
+        if cand == 'feature_name':
+            cleaned = _strip_ensembl_suffix(names)
+            hits = np.where(cleaned == gene)[0]
+            if hits.size:
+                return int(hits[0]), cand
+            hits = np.where(np.char.lower(cleaned) == gene_lower)[0]
+            if hits.size:
+                return int(hits[0]), cand
     return None, None
 
 
