@@ -476,3 +476,77 @@ def dataset_gene_expression(request, dataset_id):
     except Exception as e:
         print(e)
         return Response({'status': 'error', 'message': str(e)}, status=500)
+
+
+# ================================
+# 9. 基因名建议（Gene 选择器下拉）
+# ================================
+_gene_suggest_cache = {}
+_GENE_SUGGEST_TTL = 300
+
+
+@api_view(['GET'])
+def dataset_gene_suggest(request, dataset_id):
+    """单数据集基因名建议（详情页基因着色选择器的下拉候选）。
+
+    GET /dataset/detail/<id>/gene/suggest/?q=CD&limit=20
+    """
+    q = (request.GET.get('q') or '').strip()
+    try:
+        limit = int(request.GET.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 50))
+
+    if not q:
+        return Response({'status': 'success', 'symbols': []})
+
+    try:
+        ds = Dataset.objects.get(dataset_id=dataset_id)
+    except Dataset.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Dataset not found'}, status=404)
+
+    file_path = ds.file_path
+    if not file_path or not os.path.exists(file_path):
+        return Response({'status': 'error', 'message': 'File not found'}, status=404)
+
+    cache_key = f"{dataset_id}|{q.lower()}|{limit}"
+    now = time.time()
+    cached = _gene_suggest_cache.get(cache_key)
+    if cached and cached[1] > now:
+        return Response(cached[0])
+
+    try:
+        with h5py.File(file_path, 'r') as f:
+            if 'feature_name' in f['var']:
+                names = _strip_ensembl_suffix(_var_col_values(f, 'feature_name'))
+            elif 'gene_symbols' in f['var']:
+                names = _var_col_values(f, 'gene_symbols')
+            else:
+                index_col = _h5ad_attr_str(f['var'].attrs, '_index', '_index')
+                names = _var_col_values(f, index_col)
+
+        q_lower = q.lower()
+        hits = np.char.find(np.char.lower(names), q_lower) >= 0
+        matched = names[hits]
+        prefix = np.char.startswith(np.char.lower(matched), q_lower)
+        ordered = np.concatenate([matched[prefix], matched[~prefix]])
+
+        seen = set()
+        symbols = []
+        for name in ordered:
+            s = str(name)
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            symbols.append(s)
+            if len(symbols) >= limit:
+                break
+
+        body = {'status': 'success', 'symbols': symbols}
+        _gene_suggest_cache[cache_key] = (body, time.time() + _GENE_SUGGEST_TTL)
+        return Response(body)
+
+    except Exception as e:
+        print(e)
+        return Response({'status': 'error', 'message': str(e)}, status=500)

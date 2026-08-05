@@ -56,6 +56,7 @@ urlpatterns = [
     path('dataset/detail/<str:dataset_id>/info/', dataset.views.detail_info),
     path('dataset/detail/<str:dataset_id>/scatter/', dataset.views.detail_scatter),
     path('dataset/detail/<str:dataset_id>/gene/', dataset.views.dataset_gene_expression),
+    path('dataset/detail/<str:dataset_id>/gene/suggest/', dataset.views.dataset_gene_suggest),
     path('dataset/download/<str:dataset_id>/', dataset.views.download_h5ad),
 ]
 
