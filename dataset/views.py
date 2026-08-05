@@ -189,6 +189,12 @@ def _h5ad_obs_cols(f, target_cols):
             categories = np.asarray(obj['categories'][:])
             if categories.dtype.kind == 'S':
                 categories = np.array([c.decode('utf-8', 'replace') for c in categories])
+            elif categories.dtype.kind == 'O':
+                # categories 元素可能是原始 bytes（object dtype），
+                # 直接赋值会给 vals 留下 bytes → astype(str) 变成 "b'B cell'"
+                categories = np.array(
+                    [c.decode('utf-8', 'replace') if isinstance(c, bytes) else c for c in categories]
+                )
             vals = np.empty(len(codes), dtype=object)
             vals[:] = 'Unknown'
             mask = (codes >= 0) & (codes < len(categories))
