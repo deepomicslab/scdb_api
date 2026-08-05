@@ -6,7 +6,7 @@ no auth; task identity is tracked via a cookie `userId` sent in query/body as `u
 
 ## Setup
 
-- Python env: `conda activate scdb` (located at `/data2/platform/scdb_platform/env/scdb`)
+- Python env: `conda activate scdb`
 - PostgreSQL database: `scdb_platform_dev`
 - `settings_local.py` and `.env` are git-ignored; copy from `settings_local.example` / `.env.example`
   on a fresh checkout, otherwise imports will fail.
@@ -36,7 +36,7 @@ Restart = kill the process and re-run the command.
 
 ## R Service
 
-R (CellChat etc.) runs in a separate `cellchat` conda env subprocess
-(`/data3/platform/sc_db/cellchat/env`, started by `task/apps.py` via a Unix socket proxy).
-The scdb env has rpy2, but R calls must go through the `r_proxy` subprocess proxy;
-do not import `task.cellchat_r_service` in the main process to run R logic.
+R (CellChat etc.) runs in a separate conda env subprocess, started by `task/apps.py`
+via a Unix socket proxy (the env is a server-side deployment detail; do not rely on it
+locally). The scdb env has rpy2, but R calls must go through the `r_proxy` subprocess
+proxy; do not import `task.cellchat_r_service` in the main process to run R logic.
