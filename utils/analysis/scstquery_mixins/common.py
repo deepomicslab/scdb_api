@@ -86,6 +86,9 @@ class CommonMixin:
                 new_value['title'] = new_key
                 new_value['description'] = description
                 new_value['meta'] = meta_info
+                # 图像存在性（hires.jpg 缓存判定）：前端据此跳过 getImg 请求，避免无图 404 刷日志
+                if db_obj:
+                    new_value['has_image'] = db_obj.has_image()
 
                 _subtasks = subtask_map.get(db_obj.dataset_id if db_obj else None, {}) \
                     or subtask_map.get(original_path, {})

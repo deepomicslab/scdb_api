@@ -108,6 +108,15 @@ class Dataset(models.Model):
         # 提图 3 档 JPEG（getImg 直读，不再按需从 h5ad 提取）
         self._extract_images()
 
+    def has_image(self):
+        """hires.jpg 是否已缓存（thumbnail/medium 可由 getImg 从 hires 重建，
+        getImg 直读的 3 档文件由 _extract_images 一次生成，同目录）。"""
+        if not self.image_dir and not self.dataset_id:
+            return False
+        from django.conf import settings
+        image_dir = self.image_dir or f'st/{self.dataset_id}'
+        return os.path.exists(os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg'))
+
     def _extract_images(self):
         """从 h5ad 提取 3 档 JPEG 到 MEDIA_ROOT/{image_dir}/。
 

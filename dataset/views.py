@@ -150,6 +150,7 @@ def detail_info(request, dataset_id):
                 'description': ds.description,
                 'n_spots': ds.n_spots,
                 'n_donors': ds.n_donors,
+                'has_image': ds.has_image(),
             }
         })
     except Dataset.DoesNotExist:
