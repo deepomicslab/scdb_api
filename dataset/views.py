@@ -8,7 +8,6 @@ import h5py
 import numpy as np
 import pandas as pd
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 
 from .models import Dataset, GlobalStat
 from utils.spatial_calibration import read_spatial_calibration
@@ -317,12 +316,10 @@ def download_h5ad(request, dataset_id):
 
 
 # ================================
-# 8. 基因表达检索（跨数据集聚合 + 单数据集逐 spot）
+# 8. 基因表达检索（单数据集逐 spot）
 # ================================
-_gene_stats_cache = {}
 _gene_spot_cache = {}
 _GENE_CACHE_TTL = 3600
-_GENE_MAX_WORKERS = 8
 
 
 def _h5ad_attr_str(attrs, key, default):
@@ -414,122 +411,6 @@ def _extract_gene_column(f, col_idx):
                 expr[rows] = data[pos]
         return expr
     return np.asarray(X[:, col_idx], dtype=float).ravel()
-
-
-def _obs_labels(f):
-    """逐 spot 的细胞类型标签（Label > cell_type > annotation，缺省 Unknown）。"""
-    obs_data = _h5ad_obs_cols(f, ['Label', 'cell_type', 'annotation'])
-    n = f['obs']['_index'].shape[0] if '_index' in f['obs'] else None
-    for col in ('Label', 'cell_type', 'annotation'):
-        if col in obs_data:
-            vals = obs_data[col]
-            return np.array([v if v else 'Unknown' for v in vals], dtype=object)
-    if n is None:
-        return None
-    return np.array(['Unknown'] * n, dtype=object)
-
-
-def _dataset_gene_stats(ds, gene):
-    """单个数据集读一列基因表达并按细胞类型聚合。失败/未命中返回 None。"""
-    file_path = ds.file_path
-    if not file_path or not os.path.exists(file_path):
-        return None
-    try:
-        with h5py.File(file_path, 'r') as f:
-            col_idx, matched_by = _find_gene_col(f, gene)
-            if col_idx is None:
-                return None
-            expr = _extract_gene_column(f, col_idx)
-            labels = _obs_labels(f)
-            if labels is None or len(labels) != expr.size:
-                labels = np.array(['Unknown'] * expr.size, dtype=object)
-
-        nonzero = expr != 0
-        celltypes = {}
-        for lab in np.unique(labels):
-            mask = labels == lab
-            n = int(mask.sum())
-            sub = expr[mask]
-            celltypes[str(lab)] = {
-                'n': n,
-                'n_pos': int((sub != 0).sum()),
-                'sum': float(sub.sum()),
-            }
-        return {
-            'dataset_id': ds.dataset_id,
-            'title': ds.title,
-            'organ': ds.organ or 'Unknown',
-            'disease': ds.disease or 'Unknown',
-            'matched_by': matched_by,
-            'n_spots': int(expr.size),
-            'pct_pos': float(nonzero.mean()) if expr.size else 0.0,
-            'mean': float(expr.mean()) if expr.size else 0.0,
-            'celltypes': celltypes,
-        }
-    except Exception:
-        return None
-
-
-@api_view(['GET'])
-def gene_expression_stats(request):
-    """跨数据集基因表达聚合：dot plot（器官 x 细胞类型）+ 数据集表格。
-
-    GET /dataset/index/gene/?gene=CD68[&organ=lung]
-    """
-    gene = (request.GET.get('gene') or '').strip()
-    organ = (request.GET.get('organ') or '').strip()
-    if not gene:
-        return Response({'status': 'error', 'message': 'gene parameter is required'}, status=400)
-
-    cache_key = f"{gene.lower()}|{organ.lower()}"
-    now = time.time()
-    cached = _gene_stats_cache.get(cache_key)
-    if cached and cached[1] > now:
-        return Response(cached[0])
-
-    qs = Dataset.objects.all()
-    if organ:
-        qs = qs.filter(organ__iexact=organ)
-    datasets = list(qs)
-
-    with ThreadPoolExecutor(max_workers=_GENE_MAX_WORKERS) as ex:
-        results = list(ex.map(lambda d: _dataset_gene_stats(d, gene), datasets))
-    hits = [r for r in results if r is not None]
-    hits.sort(key=lambda r: r['pct_pos'], reverse=True)
-
-    dot_agg = {}
-    for r in hits:
-        for ct, st in r['celltypes'].items():
-            key = (r['organ'], ct)
-            acc = dot_agg.setdefault(key, {'n': 0, 'n_pos': 0, 'sum': 0.0})
-            acc['n'] += st['n']
-            acc['n_pos'] += st['n_pos']
-            acc['sum'] += st['sum']
-    dot = [
-        {
-            'organ': k[0],
-            'cell_type': k[1],
-            'pct_pos': (v['n_pos'] / v['n']) if v['n'] else 0.0,
-            'mean': (v['sum'] / v['n']) if v['n'] else 0.0,
-            'n_spots': v['n'],
-        }
-        for k, v in dot_agg.items()
-    ]
-    dot.sort(key=lambda d: (d['organ'], -d['pct_pos']))
-
-    table = [{k: v for k, v in r.items() if k != 'celltypes'} for r in hits]
-
-    body = {
-        'status': 'success',
-        'gene': gene,
-        'organ': organ or 'All',
-        'total_datasets': len(datasets),
-        'matched_datasets': len(hits),
-        'dot': dot,
-        'datasets': table,
-    }
-    _gene_stats_cache[cache_key] = (body, time.time() + _GENE_CACHE_TTL)
-    return Response(body)
 
 
 @api_view(['GET'])

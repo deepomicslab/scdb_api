@@ -52,7 +52,6 @@ urlpatterns = [
     path('dataset/index/stats/organs/', dataset.views.organ_stats),     # 左侧器官列表 & 柱状图
     path('dataset/index/list/', dataset.views.dataset_list),            # 底部表格
     path('dataset/index/stats/celltypes/', dataset.views.celltype_stats),
-    path('dataset/index/gene/', dataset.views.gene_expression_stats),   # 基因表达跨数据集聚合
     
     path('dataset/detail/<str:dataset_id>/info/', dataset.views.detail_info),
     path('dataset/detail/<str:dataset_id>/scatter/', dataset.views.detail_scatter),
