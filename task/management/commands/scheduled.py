@@ -45,6 +45,7 @@ class Command(BaseCommand):
                         task_id = task.id
                         task.delete()
                         self.stdout.write(self.style.WARNING(f'Metadata not found for task {task_id}, deleted from DB'))
+                        self._append_change_log(f'Task {task_id} deleted from DB (metadata not found)')
                         continue
 
                 raw_status = slurm_get_job_status(job_id)
@@ -63,24 +64,28 @@ class Command(BaseCommand):
                                 json.dump(jsondata, f, ensure_ascii=False, indent=4)
 
                     self.stdout.write(self.style.SUCCESS(f'Task {task.id} updated to {task.status}'))
+                    self._append_change_log(f'Task {task.id} updated to {task.status}')
 
             except Exception as e:
                 error_msg = f'Error processing task {task.id}: {str(e)}'
                 self.stdout.write(self.style.ERROR(error_msg))
-                try:
-                    if (task.status or '').lower() == 'running':
-                        task.status = TaskStatus.FAILED
-                        task.save()
-                        self.stdout.write(self.style.WARNING(f'Task {task.id} marked Failed due to processing error'))
-                except Exception:
-                    pass
+        try:
+            if (task.status or '').lower() == 'running':
+                task.status = TaskStatus.FAILED
+                task.save()
+                self.stdout.write(self.style.WARNING(f'Task {task.id} marked Failed due to processing error'))
+                self._append_change_log(f'Task {task.id} updated to {task.status}')
+        except Exception:
+            pass
 
+    def _append_change_log(self, msg):
+        """真实变更才写一行（空跑不写），避免 update.txt 无限增长。"""
         try:
             current_time = datetime.datetime.now()
             log_dir = "/home/platform/project/scdb_platform/scdb_api_logs"
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, "update.txt")
             with open(log_path, 'a+') as f:
-                f.write('exec update finish at ' + str(current_time) + "\n")
+                f.write(f'{msg} at {str(current_time)}\n')
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'Failed to write execution log: {e}'))
