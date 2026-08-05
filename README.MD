@@ -15,7 +15,7 @@ no auth; task identity is tracked via a cookie `userId` sent in query/body as `u
 conda activate scdb
 python manage.py migrate
 python manage.py makemigrations
-python manage.py runserver 8899
+python manage.py runserver <port>
 ```
 
 ## Task Status Sync
@@ -29,7 +29,7 @@ python manage.py runserver 8899
 Gunicorn (no runserver, no systemd/supervisor):
 
 ```bash
-gunicorn scdb_api.wsgi:application --workers 4 --bind 127.0.0.1:8899 --preload --timeout 120
+gunicorn scdb_api.wsgi:application --workers 4 --bind 127.0.0.1:<port> --preload --timeout 120
 ```
 
 Restart = kill the process and re-run the command.
