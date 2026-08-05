@@ -13,7 +13,7 @@ class CoreConfig(AppConfig):
     def ready(self):
         # Only run inside web server process (runserver / gunicorn / uwsgi)
         # Skip management commands like migrate / makemigrations / shell / test
-        # 注意：gunicorn 的 sys.argv[0] 是完整路径，需按 basename 判断
+        # note: gunicorn sets sys.argv[0] to a full path, so match by basename
         if not any(os.path.basename(str(x)) in ('runserver', 'gunicorn', 'uwsgi') for x in sys.argv):
             return
 

@@ -2,34 +2,34 @@ import pandas as pd
 
 def paginate_dataframe(df: pd.DataFrame, page_number: int, page_size: int) -> pd.DataFrame:
     """
-    返回DataFrame的一个子集，对应于给定的页码和页面大小。
+    Return a subset of the DataFrame corresponding to the given page number and page size.
 
-    参数:
-    df -- 要分页的Pandas DataFrame
-    page_number -- 页码，从1开始
-    page_size -- 每页的行数
+    Args:
+    df -- the Pandas DataFrame to paginate
+    page_number -- page number, starting from 1
+    page_size -- number of rows per page
 
-    返回值:
-    分页后的DataFrame，如果页码超出范围，则为空DataFrame
+    Returns:
+    The paginated DataFrame, or an empty DataFrame if the page number is out of range
     """
-    # 检查输入参数
+    # Validate the input parameters
     if not isinstance(page_number, int) or not isinstance(page_size, int):
         raise ValueError("Page number and page size should be integers.")
     if page_number < 1 or page_size < 1:
         raise ValueError("Page number and page size should be positive integers.")
     
-    # 计算起始和结束的索引
+    # Compute the start and end indices
     start = (page_number - 1) * page_size
     end = start + page_size
     
-    # 检查页码是否超出范围
+    # Check whether the page number is out of range
     if start >= len(df) or start < 0:
         return pd.DataFrame()
     
-    # 调整结束索引以避免超出DataFrame的长度
+    # Clamp the end index to avoid exceeding the DataFrame length
     end = min(end, len(df))
 
-    # 返回分页后的DataFrame
+    # Return the paginated DataFrame
     return df.iloc[start:end]
 
 

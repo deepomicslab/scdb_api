@@ -15,15 +15,15 @@ import sys
 import json
 import threading
 
-# 隔离 ~/.local 的 site-packages，避免旧版 numpy/pandas 版本冲突
-# conda env 自带兼容版本 (numpy 2.0.2 + pandas 2.2.3)
+# Isolate ~/.local site-packages to avoid conflicts with old numpy/pandas versions
+# The conda env ships compatible versions (numpy 2.0.2 + pandas 2.2.3)
 sys.path = [p for p in sys.path if '.local' not in p]
 
 # ---------------------------
-# 1. R Environment Setup (在 rpy2 导入前运行)
+# 1. R Environment Setup (run before rpy2 is imported)
 # ---------------------------
-# !! 确保这些路径在你的生产环境中是正确的 !!
-CONDAR_ENV = '/data3/platform/sc_db/cellchat/env'   # ← 你的 conda env 路径
+# !! Make sure these paths are correct in your production environment !!
+CONDAR_ENV = '/data3/platform/sc_db/cellchat/env'   # <- your conda env path
 R_HOME = os.path.join(CONDAR_ENV, 'lib', 'R')
 R_BIN = os.path.join(CONDAR_ENV, 'bin')
 LD_LIB = os.path.join(CONDAR_ENV, 'lib', 'R', 'lib')
@@ -35,29 +35,29 @@ os.environ['LD_LIBRARY_PATH'] = LD_LIB + ':' + os.environ.get('LD_LIBRARY_PATH',
 print(f"Using R_HOME: {os.environ.get('R_HOME')}")
 
 # ---------------------------
-# 2. R 脚本路径
+# 2. R script path
 # ---------------------------
-# !! 确保这个路径是正确的 !!
+# !! Make sure this path is correct !!
 R_SCRIPT_PATH = '/data3/platform/sc_db/cellchat/api/api.R'
 
 # ---------------------------
-# 3. rpy2 导入与激活 (此操作很慢，但在模块加载时只执行一次)
+# 3. rpy2 import and activation (slow, but only runs once at module load)
 # ---------------------------
 try:
     from rpy2 import robjects
     from rpy2.robjects import r, globalenv
     from rpy2.robjects import pandas2ri
-    from rpy2.robjects.conversion import localconverter  # ← 新增：用于多线程上下文管理
-    # pandas2ri.activate() 已在 rpy2 3.6+ 废弃，改用 localconverter 显式上下文
+    from rpy2.robjects.conversion import localconverter  # new: for multithreaded context management
+    # pandas2ri.activate() is deprecated in rpy2 3.6+, use explicit localconverter contexts instead
     from rpy2.robjects.packages import importr
     print("✅ rpy2 imported successfully (R Service INIT).")
 except Exception as e:
     print(f"FATAL: Failed to import rpy2. Check R environment variables. Error: {e}", file=sys.stderr)
-    # R 无法加载，服务将无法工作
+    # R failed to load, the service will not work
     sys.exit(1)
 
 # ---------------------------
-# 4. Source R 脚本 (只执行一次)
+# 4. Source the R script (only once)
 # ---------------------------
 try:
     r['source'](R_SCRIPT_PATH)
@@ -67,7 +67,7 @@ except Exception as e:
     sys.exit(1)
     
 # ---------------------------
-# 5. 获取 R 函数的引用 (只执行一次)
+# 5. Get references to the R functions (only once)
 # ---------------------------
 try:
     R_create_api = r['create_api']
@@ -81,52 +81,52 @@ except Exception as e:
     sys.exit(1)
 
 
-# 自定义错误
+# Custom error
 class RServiceError(Exception):
     pass
 
 # ---------------------------
-# 6. 服务类 (Singleton)
+# 6. Service class (Singleton)
 # ---------------------------
 class CellChatService:
     """
-    管理有状态的 R 'cellchat_api' 对象缓存。
+    Manages a cache of stateful R 'cellchat_api' objects.
     """
     def __init__(self):
-        # 核心缓存: { "rds_path": r_api_object }
+        # Core cache: { "rds_path": r_api_object }
         self.api_cache = {}
-        self._lock = threading.Lock() # 确保缓存操作的线程安全
+        self._lock = threading.Lock() # thread safety for cache operations
         print("CellChatService instance created (Cache is empty).")
 
     def _get_api(self, rds_path):
         """
-        核心逻辑：从缓存中获取或创建 R API 对象。
+        Core logic: get or create the R API object from the cache.
         """
-        # 1. 检查文件是否存在（快速失败）
+        # 1. Check the file exists (fail fast)
         if not os.path.exists(rds_path):
             raise RServiceError(f"RDS file not found: {rds_path}")
 
-        # 2. 尝试从缓存中获取
+        # 2. Try to get it from the cache
         api_object = self.api_cache.get(rds_path)
         if api_object:
-            return api_object # 缓存命中，快速返回
+            return api_object # cache hit, return fast
 
-        # 3. 缓存未命中，需要创建（加锁）
+        # 3. Cache miss, need to create it (locked)
         with self._lock:
-            # 再次检查，防止在等待锁时其他线程已经加载了它
+            # Re-check, in case another thread already loaded it while waiting for the lock
             api_object = self.api_cache.get(rds_path)
             if api_object:
                 return api_object
 
-            # 真正创建
+            # Actually create it
             print(f"🔹 [RService] Caching new RDS: {rds_path}")
             try:
-                # 修复：用 localconverter 包装 R 调用，确保多线程上下文传递
+                # Fix: wrap the R call in localconverter so the context is passed across threads
                 with localconverter(robjects.default_converter):
-                    # 调用 R: new_api = create_api(rds_path)
+                    # Call R: new_api = create_api(rds_path)
                     new_api = R_create_api(rds_path)
                 
-                # 存入缓存
+                # Store in cache
                 self.api_cache[rds_path] = new_api
                 print(f"✅ [RService] Successfully cached: {rds_path}")
                 return new_api
@@ -136,32 +136,32 @@ class CellChatService:
 
     def _call_r_json_method(self, r_function, rds_path, *args):
         """
-        通用的R调用辅助函数。
-        它首先获取API对象（来自缓存），然后调用R函数。
+        Generic R-call helper.
+        It first gets the API object (from the cache), then calls the R function.
         """
-        # 1. 从缓存获取 (或创建) R-side API 对象
+        # 1. Get (or create) the R-side API object from the cache
         api_object = self._get_api(rds_path)
         
-        # 2. 调用R函数
+        # 2. Call the R function
         try:
-            # 修复：用 localconverter 包装 R 调用，确保多线程上下文传递
+            # Fix: wrap the R call in localconverter so the context is passed across threads
             with localconverter(robjects.default_converter):
-                # 将 R-side api 对象和其它参数传给 R-side wrapper
+                # Pass the R-side api object and other args to the R-side wrapper
                 res = r_function(api_object, *args)
-                # res[0] 是 R 返回的 JSON 字符串
+                # res[0] is the JSON string returned by R
                 return json.loads(str(res[0]))
         except Exception as e:
             print(f"Error calling R function {r_function.__name__} for RDS {rds_path}: {e}", file=sys.stderr)
             raise RServiceError(f"R execution error: {e}")
 
-    # --- 公共API方法 ---
+    # --- Public API methods ---
     
     def get_pathways(self, rds_path):
         return self._call_r_json_method(R_get_pathways, rds_path)
 
     def get_circle(self, rds_path, signaling=None):
         if signaling:
-            # 修复：signaling 需转换为 R StrVector
+            # Fix: signaling must be converted to an R StrVector
             signaling_r = robjects.StrVector([signaling])
             return self._call_r_json_method(R_get_circle, rds_path, signaling_r)
         else:
@@ -169,7 +169,7 @@ class CellChatService:
 
     def get_spatial(self, rds_path, signaling=None):
         if signaling:
-            # 修复：signaling 需转换为 R StrVector
+            # Fix: signaling must be converted to an R StrVector
             signaling_r = robjects.StrVector([signaling])
             return self._call_r_json_method(R_get_spatial, rds_path, signaling_r)
         else:
@@ -182,7 +182,7 @@ class CellChatService:
         if lrpair is None:
              raise ValueError("lrpair cannot be None")
              
-        # 修复：lrpair 转换为 R StrVector
+        # Fix: lrpair must be converted to an R StrVector
         lrpair_r = robjects.StrVector([lrpair])
         sample_use_r = robjects.StrVector([sample_use]) if sample_use else None
         
@@ -191,10 +191,10 @@ class CellChatService:
         else:
             return self._call_r_json_method(R_get_heatmap, rds_path, lrpair_r)
 
-    # --- 管理方法 ---
+    # --- Management methods ---
     
     def get_status(self):
-        """返回服务的当前状态。"""
+        """Return the current status of the service."""
         with self._lock:
             return {
                 "cached_rds_files": list(self.api_cache.keys()),
@@ -202,15 +202,15 @@ class CellChatService:
             }
             
     def clear_cache(self):
-        """清空所有缓存。"""
+        """Clear all caches."""
         with self._lock:
             self.api_cache.clear()
             print("Cleared all R object cache.")
 
 
 # ---------------------------
-# 7. 创建单例实例
+# 7. Create the singleton instance
 # ---------------------------
-# 当你从Django的 `views.py` 或 `apps.py` 中 `import` 这个模块时，
-# 下面的所有代码（1-5）都会执行，并且这个实例会被创建。
+# When you `import` this module from Django's `views.py` or `apps.py`,
+# all the code above (1-5) runs, and this instance is created.
 cellchat_service = CellChatService()

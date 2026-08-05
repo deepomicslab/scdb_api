@@ -47,7 +47,7 @@ class Scquery(Module):
         umappddata = pd.read_csv(umapfile, sep='\t', index_col=False)
         rename_dict = {'cell_id': 'Cell_id',}
         umappddata.rename(columns=rename_dict, inplace=True)
-        default_value = 'default'  # 可以是数字、字符串等
+        default_value = 'default'  # can be a number, string, etc.
         umappddata_filled = umappddata.fillna(default_value)
         res={'results': umappddata_filled.to_dict(orient='records')}
         return res

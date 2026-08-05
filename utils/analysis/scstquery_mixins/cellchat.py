@@ -12,7 +12,7 @@ class CellChatMixin:
     """CellChat cell-cell interaction result methods for Scstquery."""
 
     def _get_cellchat_proxy(self):
-        """懒连接 R 服务；失败返回 None（调用方按 'not linked' 处理）。"""
+        """Lazily connect to the R service; returns None on failure (caller handles it as 'not linked')."""
         try:
             return get_r_proxy()
         except Exception:
@@ -58,7 +58,7 @@ class CellChatMixin:
 
     
     def _find_cellchat_rds(self, dataset, mapping_method=None):
-        """根据 dataset_id 定位 subtask_cellchat 的 RDS 文件"""
+        """Locate the subtask_cellchat RDS file by dataset_id"""
         if getattr(self, '_is_demo', False):
             if mapping_method:
                 method_path = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, 'cellchat_result.rds')

@@ -48,9 +48,9 @@ urlpatterns = [
     path('tasks/subtask/log/', task.views.subtask_log),
     
     # path('dataset/index/', dataset.views.index_data),
-    path('dataset/index/stats/global/', dataset.views.global_stats),    # 顶部数据
-    path('dataset/index/stats/organs/', dataset.views.organ_stats),     # 左侧器官列表 & 柱状图
-    path('dataset/index/list/', dataset.views.dataset_list),            # 底部表格
+    path('dataset/index/stats/global/', dataset.views.global_stats),    # top stats bar
+    path('dataset/index/stats/organs/', dataset.views.organ_stats),     # organ list & bar chart
+    path('dataset/index/list/', dataset.views.dataset_list),            # bottom table
     path('dataset/index/stats/celltypes/', dataset.views.celltype_stats),
     
     path('dataset/detail/<str:dataset_id>/info/', dataset.views.detail_info),

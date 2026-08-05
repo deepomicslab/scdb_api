@@ -4,15 +4,15 @@ import pandas as pd
 from collections import OrderedDict
 
 
-# gene_expression.csv 解析缓存：mtime 感知 + LRU 上限 2 个文件。
-# 408MB CSV 首读 ~20s；缓存建立后同一任务后续所有
-# markerGenes / markerGeneExpressions 请求直接命中（~0.1s）。
+# gene_expression.csv parse cache: mtime-aware + LRU capped at 2 files.
+# First read of the 408MB CSV takes ~20s; once cached, all subsequent
+# markerGenes / markerGeneExpressions requests for the same task hit directly (~0.1s).
 _gene_expression_cache = OrderedDict()
 _GENE_EXPRESSION_CACHE_MAX = 2
 
 
 def _load_gene_expression(expression_file_path):
-    """读取 gene_expression.csv（mtime 感知缓存）。返回 DataFrame 或 None。"""
+    """Read gene_expression.csv (mtime-aware cache). Returns DataFrame or None."""
     if not os.path.exists(expression_file_path):
         return None
     try:

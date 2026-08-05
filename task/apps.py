@@ -6,10 +6,10 @@ import time
 import threading
 from multiprocessing.managers import BaseManager
 
-# 全局变量
+# Global variables
 r_proxy = None
 
-# ================= 配置区 =================
+# ================= Config section =================
 CONDA_PYTHON = '/data3/platform/sc_db/cellchat/env/bin/python'
 WORKER_SCRIPT = os.path.join(os.path.dirname(__file__), 'r_worker.py')
 SOCKET_PATH = '/tmp/cellchat_r.sock'
@@ -26,11 +26,12 @@ RServiceManager.register('get_cellchat_service')
 
 
 def get_r_proxy():
-    """懒连接 R 服务：首次调用时建立连接，之后复用。
+    """Lazily connect to the R service: establish the connection on first call, reuse afterwards.
 
-    gunicorn 多 worker 下 fork 会复制预建的 socket 连接（4 个 worker 共享
-    同一条连接会串数据），因此不能在进程启动时预连——每个 worker 首次
-    调用时各自 connect。runserver 单进程下语义与预连等价。
+    Under gunicorn with multiple workers, fork copies the pre-built socket connection
+    (4 workers sharing one connection would interleave data), so we must not pre-connect
+    at process startup - each worker connects on its first call. Under runserver
+    (single process) the semantics are equivalent to pre-connecting.
     """
     global r_proxy
     if r_proxy is None:
@@ -46,48 +47,50 @@ class TaskConfig(AppConfig):
     name = 'task'
     
     def ready(self):
-        # 防止 runserver 重载机制导致重复执行
+        # Prevent repeated execution caused by the runserver reload mechanism
         if "runserver" in sys.argv and os.environ.get("RUN_MAIN") != "true":
             return
 
-        # 同样排除 migrate 等命令
-        # 注意：gunicorn 的 sys.argv[0] 是完整路径（如 /data2/.../bin/gunicorn），
-        # 精确匹配会失败，必须按 basename 判断。
+        # Also exclude commands like migrate
+        # Note: under gunicorn, sys.argv[0] is a full path (e.g. /data2/.../bin/gunicorn),
+        # so exact matching would fail; must match on the basename.
         if not any(os.path.basename(str(x)) in ('runserver', 'gunicorn', 'uwsgi') for x in sys.argv):
             return
 
-        print("🔹 [AppConfig] 初始化 R 子系统连接...")
+        print("🔹 [AppConfig] Initializing R subsystem connection...")
 
-        # 1. 启动子进程 (如果 socket 不存在)
-        # 注意：这里我们假设如果有 socket，说明服务活着。
-        # 如果 socket 是上次残留的死文件，可能需要手动清理，但 r_worker 启动时会清理旧的。
+        # 1. Start the subprocess (if the socket does not exist)
+        # Note: we assume that if the socket exists, the service is alive.
+        # If the socket is a leftover dead file from a previous run, it may need
+        # manual cleanup, but r_worker cleans old sockets at startup.
         if not os.path.exists(SOCKET_PATH):
-            print("⚙️ 正在启动后台 R 进程 (Conda环境)...")
+            print("⚙️ Starting background R process (Conda environment)...")
             subprocess.Popen(
                 [CONDA_PYTHON, WORKER_SCRIPT, SOCKET_PATH, AUTH_KEY.decode('utf-8')],
                 cwd=os.getcwd(),
-                # stdout=sys.stdout, # 让子进程输出显示在主终端，方便调试
+                # stdout=sys.stdout, # show subprocess output in the main terminal for debugging
                 # stderr=sys.stderr
             )
         
-        # 2. ⏳ 等待 Socket 文件生成 (最多等 60 秒)
-        # 连接本身已改为懒连接（get_r_proxy），这里只确保 R 子进程起来，
-        # 避免首次请求时 socket 尚未就绪（r_worker 加载 CellChat 需约 30-40s）。
-        print("⏳ 等待 R 服务就绪...", end='', flush=True)
-        max_retries = 120  # 120次 * 0.5秒 = 60秒超时（r_worker source CellChat 约需 30-40s）
+        # 2. ⏳ Wait for the Socket file to appear (up to 60 seconds)
+        # The connection itself is already lazy (get_r_proxy); here we only make sure
+        # the R subprocess is up, avoiding the socket not being ready on the first
+        # request (r_worker loads CellChat in about 30-40s).
+        print("⏳ Waiting for R service...", end='', flush=True)
+        max_retries = 120  # 120 retries * 0.5s = 60s timeout (r_worker sources CellChat in ~30-40s)
         connected = False
         
         for i in range(max_retries):
             if os.path.exists(SOCKET_PATH):
                 connected = True
-                print(" ✅") # 换行
+                print(" ✅") # newline
                 break
             time.sleep(0.5)
             print(".", end='', flush=True)
         
         if not connected:
-            print("\n❌ [Timeout] R 服务启动超时 (超过60秒)，Socket 文件未生成。")
-            # 这里不抛异常，避免 Django 启动失败，但由你自己决定
+            print("\n❌ [Timeout] R service startup timed out (over 60 seconds), Socket file not created.")
+            # Do not raise here to avoid Django failing to start; decide at your discretion
             return
 
-        print("🔗 [Ready] R 服务已就绪，连接将在首次 CellChat 调用时建立（get_r_proxy）")
+        print("🔗 [Ready] R service is ready; the connection will be established on the first CellChat call (get_r_proxy)")

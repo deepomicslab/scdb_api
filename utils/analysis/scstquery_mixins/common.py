@@ -81,12 +81,14 @@ class CommonMixin:
                     meta_info = {"uuid": extracted_uuid}
 
                 new_value = scores.copy()
-                # 注意：不要把服务器路径（original_path / file_path）下发给前端，
-                # 前端只使用 dataset_id；需要路径时由后端 resolve_marker_path 反查。
+                # Note: do not send server paths (original_path / file_path) to the frontend;
+                # the frontend only uses dataset_id; when a path is needed, the backend
+                # resolves it via resolve_marker_path.
                 new_value['title'] = new_key
                 new_value['description'] = description
                 new_value['meta'] = meta_info
-                # 图像存在性（hires.jpg 缓存判定）：前端据此跳过 getImg 请求，避免无图 404 刷日志
+                # Image presence (hires.jpg cache check): the frontend uses this to skip
+                # getImg requests, avoiding no-image 404s spamming the logs
                 if db_obj:
                     new_value['has_image'] = db_obj.has_image()
 
@@ -105,7 +107,8 @@ class CommonMixin:
         from pathlib import Path
         from utils.analysis.base import resolve_marker_path
 
-        # 前端只传 dataset_id，服务器路径由后端反查，绝不下发/接收客户端路径
+        # The frontend only sends dataset_id; server paths are resolved by the backend
+        # and are never sent to / accepted from the client
         task_dir = self.path.replace(local_settings.USERTASKPATH, '')
         datasetPath = resolve_marker_path(task_dir, dataset)
         if not datasetPath or not os.path.exists(datasetPath):

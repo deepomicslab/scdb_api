@@ -79,7 +79,7 @@ class Command(BaseCommand):
             pass
 
     def _append_change_log(self, msg):
-        """真实变更才写一行（空跑不写），避免 update.txt 无限增长。"""
+        """Write a line only for real changes (not on empty runs), so update.txt stops growing."""
         try:
             current_time = datetime.datetime.now()
             log_dir = "/home/platform/project/scdb_platform/scdb_api_logs"

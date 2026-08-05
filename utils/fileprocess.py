@@ -2,7 +2,8 @@ import os
 
 def get_gene_list(directory):
     """
-    #获取目录下所有文件名中下划线后的部分，返回一个列表, 用于batcheffect
+    # get the part after the underscore in every file name in the directory,
+# return as a list; used by batcheffect
     """
     file_names_without_extension = []
     genepathdict = {}
@@ -14,7 +15,7 @@ def get_gene_list(directory):
                 file_names_without_extension.append(parts[1])
                 genepathdict[parts[1]] =  item
             else:
-                # 如果文件名中没有下划线，你可以选择忽略或者做其他处理
+                # if the file name has no underscore, ignore it or handle otherwise
                 pass
     return file_names_without_extension, genepathdict
 
@@ -29,6 +30,6 @@ def get_cluster_list(directory):
                 file_names_without_extension.append(parts[1])
                 clusterdict[parts[1]] =  item
             else:
-                # 如果文件名中没有下划线，你可以选择忽略或者做其他处理
+                # if the file name has no underscore, ignore it or handle otherwise
                 pass
     return file_names_without_extension, clusterdict

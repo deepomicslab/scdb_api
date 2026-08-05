@@ -9,15 +9,16 @@ from utils.spatial_calibration import read_spatial_calibration
 from scdb_api import settings_local as local_settings
 
 
-# adata_spider.h5ad 句柄缓存：mtime 感知 + LRU 上限 3 个文件。
-# backed 打开 ~0.9s（828MB 文件），句柄命中后 pattern/lr/init 只剩读取开销
-# （~0.04s）；"Load All LR Pairs" 串行 N 个请求省掉 N 次打开。重跑覆盖自动失效。
+# adata_spider.h5ad handle cache: mtime-aware + LRU capped at 3 files.
+# Backed open takes ~0.9s (828MB file); once the handle hits, pattern/lr/init only
+# pay the read cost (~0.04s); "Load All LR Pairs" serial N requests skip N opens.
+# Re-runs overwriting the file invalidate the entry automatically.
 _spider_adata_cache = OrderedDict()
 _SPIDER_ADATA_CACHE_MAX = 3
 
 
 def _load_spider_adata(file_path):
-    """backed 打开 adata_spider.h5ad（mtime 感知缓存）。返回 AnnData 或 None。"""
+    """Open adata_spider.h5ad in backed mode (mtime-aware cache). Returns AnnData or None."""
     if not os.path.exists(file_path):
         return None
     try:
@@ -74,7 +75,7 @@ class SpiderMixin:
         uuid = self._resolve_dataset_uuid(dataset)
         base_dir = os.path.join(self.path, f'dataset_{uuid}') if uuid else self.path
 
-        # 优先级1: lr_comparison 目录
+        # Priority 1: lr_comparison directory
         lr_base = os.path.join(base_dir, 'subtask_lr_comparison', 'result')
         sc_path = os.path.join(lr_base, 'spearman', 'lr_level_spearman_correlation_sc.csv')
         if mapping_method:
@@ -85,7 +86,7 @@ class SpiderMixin:
         if os.path.exists(sc_path) and os.path.exists(st_path):
             return self._read_spearman_csvs(sc_path, st_path)
 
-        # 优先级2: 旧 spider 目录 (sc_st_mapping/{method}/spearman/)
+        # Priority 2: legacy spider directory (sc_st_mapping/{method}/spearman/)
         spider_base = os.path.join(base_dir, 'subtask_spider', 'result')
         if mapping_method:
             method_dir = os.path.join(spider_base, 'sc_st_mapping', mapping_method)
@@ -94,13 +95,13 @@ class SpiderMixin:
             if os.path.exists(method_sc_st_path):
                 return self._read_spearman_csvs(method_sc_path, method_sc_st_path)
 
-        # 优先级3: 旧 spider 目录 (spearman/ 平级)
+        # Priority 3: legacy spider directory (spearman/ flat)
         fallback_sc = os.path.join(spider_base, 'spearman', 'lr_level_spearman_correlation_sc.csv')
         fallback_st = os.path.join(spider_base, 'spearman', 'lr_level_spearman_correlation_sc_st.csv')
         if os.path.exists(fallback_sc) or os.path.exists(fallback_st):
             return self._read_spearman_csvs(fallback_sc, fallback_st)
 
-        # 优先级4: demo 路径
+        # Priority 4: demo path
         demo_base = os.path.join(self.path, 'result', 'spider')
         demo_sc = os.path.join(demo_base, 'spearman', 'lr_level_spearman_correlation_sc.csv')
         demo_st = os.path.join(demo_base, 'spearman', 'lr_level_spearman_correlation_sc_st.csv')
@@ -161,10 +162,11 @@ class SpiderMixin:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
     def getSpiderInit(self, dataset=None, mapping_method=None):
-        """轻量元信息：pattern 列表 + 每 pattern 的 top10 LR + 校准值（不含 coordinates）。
+        """Lightweight metadata: pattern list + top-10 LRs per pattern + calibration values (no coordinates).
 
-        coordinates 单独由 getSpiderCoords 提供——前端打开面板先秒出菜单，
-        坐标后台并行拉取，避免 2MB JSON 阻塞首屏。
+        Coordinates are served separately by getSpiderCoords - the frontend shows
+        the menu instantly on opening the panel while the coordinates are fetched
+        in parallel in the background, avoiding a 2MB JSON blocking the first screen.
         """
         h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         if not os.path.exists(h5ad_path):
@@ -194,9 +196,10 @@ class SpiderMixin:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
     def getSpiderCoords(self, dataset=None, mapping_method=None):
-        """全量坐标基底（12379 点 {id, x, y}，x/y 已预乘 scalef）+ 校准值。
+        """Full coordinate base (12379 points {id, x, y}, x/y already premultiplied by scalef) + calibration values.
 
-        前端选 pattern 前一次性拉取并缓存，后续 pattern/lr 只传 values。
+        The frontend fetches and caches this once before selecting a pattern;
+        subsequent pattern/lr requests only send values.
         """
         h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
         if not os.path.exists(h5ad_path):

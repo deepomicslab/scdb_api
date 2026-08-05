@@ -7,15 +7,16 @@ from collections import OrderedDict
 from dataset.models import Dataset
 
 
-# commot *_LR.h5ad 句柄缓存：mtime 感知 + LRU 上限 2 个文件。
-# sc.read() 全量读 337MB ~3.1s；backed 只读 obsm 局部 ~1s；
-# 缓存命中后 LRPairs / 信号强度 ~0.01s（重跑覆盖文件自动失效）。
+# commot *_LR.h5ad handle cache: mtime-aware + LRU capped at 2 files.
+# sc.read() fully loads 337MB in ~3.1s; backed mode only reads the obsm slice in ~1s;
+# after a cache hit, LRPairs / signal strength take ~0.01s (overwritten files
+# are invalidated automatically).
 _commot_adata_cache = OrderedDict()
 _COMMOT_ADATA_CACHE_MAX = 2
 
 
 def _load_commot_adata(file_path):
-    """backed 打开 *_LR.h5ad（mtime 感知缓存）。返回 AnnData 或 None。"""
+    """Open *_LR.h5ad in backed mode (mtime-aware cache). Returns AnnData or None."""
     if not os.path.exists(file_path):
         return None
     try:
@@ -96,7 +97,7 @@ class CommotMixin:
             'x': spatial_coords[:, 0],
             'y': spatial_coords[:, 1],
             lr_pair: receiver_strength
-        }, index=adata.obs_names)  # 显式用 barcode 作 key，与 countHeatmap CSV 第一列一致
+        }, index=adata.obs_names)  # use the barcode explicitly as the key, consistent with the first column of the countHeatmap CSV
         res = {'receiver_strength': df.to_dict(orient='index'), 'status': 'success'}
         return res
     

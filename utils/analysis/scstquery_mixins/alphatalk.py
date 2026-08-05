@@ -5,15 +5,17 @@ from collections import OrderedDict
 from dataset.models import Dataset
 
 
-# cci_result.pkl 解析缓存：mtime 感知 + LRU 上限 2 个文件。
-# pickle.load 全量 4.9MB ~0.3s，命中后筛选/排序/分页/metadata 全走内存 df（~ms）。
-# 重跑覆盖 pkl 自动失效。缓存 df 只读（筛选/排序均返回新对象，不原地修改）。
+# cci_result.pkl parse cache: mtime-aware + LRU capped at 2 files.
+# pickle.load fully reads 4.9MB in ~0.3s; on a hit, filtering/sorting/pagination/
+# metadata all run on the in-memory df (~ms).
+# Re-runs overwriting the pkl invalidate the entry automatically. The cached df is
+# read-only (filtering/sorting return new objects, never mutate in place).
 _alphatalk_df_cache = OrderedDict()
 _ALPHATALK_CACHE_MAX = 2
 
 
 def _load_alphatalk_df(pkl_path):
-    """读取 cci_result.pkl 的 lr_score DataFrame（mtime 感知缓存）。"""
+    """Read the lr_score DataFrame from cci_result.pkl (mtime-aware cache)."""
     try:
         mtime = os.path.getmtime(pkl_path)
     except OSError:
@@ -78,7 +80,7 @@ class AlphaTalkMixin:
             if df.empty:
                 return {'data': [], 'total': 0, 'status': 'success', 'message': "Empty result"}
 
-            # 1. 类别筛选
+            # 1. Categorical filters
             if sender:
                 df = df[df['cell_sender'] == sender]
             if receiver:
@@ -90,7 +92,7 @@ class AlphaTalkMixin:
             if type_col:
                 df = df[df['type'] == type_col]
 
-            # 2. 数值范围筛选
+            # 2. Numeric range filters
             def filter_range(dataframe, col_name, min_v, max_v):
                 if col_name not in dataframe.columns: return dataframe
                 temp_df = dataframe

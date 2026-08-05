@@ -5,12 +5,13 @@ from django.conf import settings
 from dataset.models import Dataset
 
 
-# 图片分辨率常量（可随时调整：getImg 校验到实际文件不符时自动按新值重建）
+# Image resolution constants (adjustable at any time: getImg rebuilds automatically
+# from the new values when it detects the actual file does not match)
 MEDIUM_MAX_SIZE = 800
 THUMBNAIL_MAX_SIZE = 400
 
-# 图片规格表（单一来源）：resolution -> (文件名, 最大尺寸, 保存参数)
-# 供 getImg 与 Dataset._extract_images 共用；max_size=None 表示原尺寸（hires）
+# Image spec table (single source of truth): resolution -> (file name, max size, save kwargs)
+# Shared by getImg and Dataset._extract_images; max_size=None means original size (hires)
 IMAGE_RES_SPECS = {
     'thumbnail': ('thumbnail.jpg', THUMBNAIL_MAX_SIZE, {'quality': 75, 'optimize': True}),
     'medium': ('medium.jpg', MEDIUM_MAX_SIZE, {'quality': 80, 'optimize': True}),
@@ -19,9 +20,10 @@ IMAGE_RES_SPECS = {
 
 
 def pil_image_from_array(arr):
-    """h5ad 图像数组 → JPEG 可写的 PIL Image。
+    """h5ad image array -> PIL Image writable as JPEG.
 
-    JPEG 不支持 RGBA/带 alpha 的模式：透明图先合成到白底，其它非常规模式转 RGB。
+    JPEG does not support RGBA/alpha modes: transparent images are composited onto
+    a white background first; other unusual modes are converted to RGB.
     """
     img = Image.fromarray(arr)
     if img.mode == 'RGBA':
@@ -62,14 +64,17 @@ def premultiply_coords(data, scalef):
 
 
 def extract_spatial_calibration(file_path):
-    """从 h5ad 提取空间校准的原始值。
+    """Extract the raw spatial calibration values from h5ad.
 
-    返回 (scalef_raw, spot)：
-      - scalef_raw: 未乘任何 ratio 的原始 scalef（hires→lowres 优先级解析后）
+    Returns (scalef_raw, spot):
+      - scalef_raw: the raw scalef not multiplied by any ratio (resolved with
+        hires -> lowres priority)
       - spot: spot_diameter_fullres
 
-    与 getImg 的图像源优先级一致（hires → lowres），保证 scalef 匹配实际被服务的图。
-    medium 空间换算由 read_spatial_calibration 按实际文件尺寸实时计算（方案 B）。
+    Matches the getImg image-source priority (hires -> lowres), so the scalef
+    always corresponds to the image actually served. The medium-space conversion
+    is computed on the fly by read_spatial_calibration from the actual file
+    dimensions (plan B).
     """
     if not file_path or not os.path.exists(file_path):
         return None, None
@@ -85,7 +90,8 @@ def extract_spatial_calibration(file_path):
             if not libs:
                 return scalef, spot
 
-            # 库选择：跳过标量标志位（如 is_single），取第一个含 images/scalefactors 的 Group
+            # Library selection: skip scalar flags (e.g. is_single), take the first
+            # Group containing images/scalefactors
             lib = None
             for candidate in libs:
                 node = f.get(f'uns/spatial/{candidate}')
@@ -134,7 +140,7 @@ def extract_spatial_calibration(file_path):
 
 
 def _jpeg_dimensions(path):
-    """读 JPEG 头部尺寸（不解码像素），失败返回 (None, None)。"""
+    """Read the JPEG header dimensions (without decoding pixels); returns (None, None) on failure."""
     try:
         with Image.open(path) as img:
             return img.width, img.height
@@ -145,12 +151,15 @@ def _jpeg_dimensions(path):
 def read_spatial_calibration(dataset_id):
     """Read (tissue_hires_scalef, spot_diameter_fullres) for a dataset.
 
-    DB-first: scalef_raw/spot_diameter_fullres 由导入/backfill 时提取入库。
-    medium 空间换算（方案 B）：ratio 按实际服务的 medium.jpg / hires.jpg 真实尺寸
-    计算（ratio = medium_w / hires_w），与 getImg 实际下发的图永远一致——
-    MEDIUM_MAX_SIZE 常量随时可变，图重建后 ratio 自动跟上，无错位窗口期。
+    DB-first: scalef_raw/spot_diameter_fullres are extracted into the DB at
+    import/backfill time. Medium-space conversion (plan B): the ratio is computed
+    from the real dimensions of the served medium.jpg / hires.jpg
+    (ratio = medium_w / hires_w), always matching the image getImg actually
+    serves - MEDIUM_MAX_SIZE can change at any time, and the ratio catches up
+    automatically once the image is rebuilt, with no misalignment window.
 
-    字段缺失（迁移前数据/新导入未 backfill）时自愈：从 h5ad 提取并写回数据库。
+    Self-healing when fields are missing (pre-migration data / new imports not
+    backfilled): extract from h5ad and write back to the database.
     """
     if not dataset_id:
         return None, None
@@ -163,7 +172,7 @@ def read_spatial_calibration(dataset_id):
     spot = ds.spot_diameter_fullres
 
     if scalef_raw is None:
-        # 自愈：字段缺失 → 从 h5ad 提取并写回
+        # Self-healing: field missing -> extract from h5ad and write back
         scalef_raw, spot = extract_spatial_calibration(ds.file_path)
         if scalef_raw is None:
             return None, None
@@ -172,7 +181,8 @@ def read_spatial_calibration(dataset_id):
             spot_diameter_fullres=spot,
         )
 
-    # ratio 按实际文件尺寸（方案 B）；文件缺失时按 hires 实际长边 + 常量兜底
+    # ratio from the actual file dimensions (plan B); when files are missing,
+    # fall back to the hires long edge + the constant
     medium_path = os.path.join(settings.MEDIA_ROOT, ds.image_dir, 'medium.jpg')
     hires_path = os.path.join(settings.MEDIA_ROOT, ds.image_dir, 'hires.jpg')
     mw, _mh = _jpeg_dimensions(medium_path)
@@ -180,7 +190,7 @@ def read_spatial_calibration(dataset_id):
     if mw and hw:
         medium_ratio = mw / hw
     elif hw and hh:
-        # 兜底：medium.jpg 缺失时按 hires 实际长边 + 常量估算
+        # Fallback: when medium.jpg is missing, estimate from the hires long edge + constant
         medium_ratio = min(MEDIUM_MAX_SIZE / hw, MEDIUM_MAX_SIZE / hh)
     else:
         medium_ratio = 1.0

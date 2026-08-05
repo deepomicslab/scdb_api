@@ -51,10 +51,13 @@ class Dataset(models.Model):
 
     cell_type_counts = models.JSONField(default=dict, blank=True, editable=False)
 
-    # 空间校准 + 图片（导入/backfill 时提取一次，getImg 与散点接口直读，不再每次开 h5ad）
-    # image_dir: 相对 MEDIA_ROOT 的图片文件夹，文件名按约定 thumbnail.jpg / medium.jpg / hires.jpg
+    # Spatial calibration + images (extracted once at import/backfill; getImg and
+    # scatter endpoints read them directly, no longer opening the h5ad every time)
+    # image_dir: image folder relative to MEDIA_ROOT, file names follow the
+    # convention thumbnail.jpg / medium.jpg / hires.jpg
     image_dir = models.CharField(max_length=300, blank=True, default='', editable=False)
-    # scalef_raw: h5ad 原始 scalef（未乘 ratio）；medium 空间换算由读取方按实际图片文件尺寸实时计算
+    # scalef_raw: raw h5ad scalef (not multiplied by ratio); medium-space conversion
+    # is computed on the fly by the reader from the actual image file dimensions
     scalef_raw = models.FloatField(null=True, blank=True, editable=False)
     spot_diameter_fullres = models.FloatField(null=True, blank=True, editable=False)
 
@@ -98,19 +101,21 @@ class Dataset(models.Model):
         except Exception as e:
             print(f"[Dataset._extract_metadata] Failed to read {self.file_path}: {e}")
 
-        # 空间校准（h5py 只读标量/元数据；局部导入避免与 utils.spatial_calibration 循环引用）
+        # Spatial calibration (h5py reads scalars/metadata only; local import
+        # avoids a circular import with utils.spatial_calibration)
         from utils.spatial_calibration import extract_spatial_calibration
         scalef_raw, spot = extract_spatial_calibration(self.file_path)
         if scalef_raw is not None or spot is not None:
             self.scalef_raw = scalef_raw
             self.spot_diameter_fullres = spot
 
-        # 提图 3 档 JPEG（getImg 直读，不再按需从 h5ad 提取）
+        # Extract the 3 JPEG tiers (read directly by getImg, no longer extracted from h5ad on demand)
         self._extract_images()
 
     def has_image(self):
-        """hires.jpg 是否已缓存（thumbnail/medium 可由 getImg 从 hires 重建，
-        getImg 直读的 3 档文件由 _extract_images 一次生成，同目录）。"""
+        """Whether hires.jpg is cached (thumbnail/medium can be rebuilt by getImg
+        from hires; the 3 tiers read directly by getImg are generated at once by
+        _extract_images in the same directory)."""
         if not self.image_dir and not self.dataset_id:
             return False
         from django.conf import settings
@@ -118,10 +123,11 @@ class Dataset(models.Model):
         return os.path.exists(os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg'))
 
     def _extract_images(self):
-        """从 h5ad 提取 3 档 JPEG 到 MEDIA_ROOT/{image_dir}/。
+        """Extract the 3 JPEG tiers from h5ad into MEDIA_ROOT/{image_dir}/.
 
-        文件名约定：thumbnail.jpg / medium.jpg / hires.jpg（getImg 按 resolution 拼接）。
-        源图优先级与 getImg 一致（hires → lowres），3 档均由同一源生成。
+        File name convention: thumbnail.jpg / medium.jpg / hires.jpg (getImg
+        concatenates them by resolution). Source image priority matches getImg
+        (hires -> lowres); all 3 tiers are generated from the same source.
         """
         import h5py
         from PIL import Image
@@ -153,7 +159,7 @@ class Dataset(models.Model):
             os.makedirs(out_dir, exist_ok=True)
 
             img = pil_image_from_array(source)
-            # 规格表单一来源（IMAGE_RES_SPECS）：文件名/最大尺寸/质量
+            # Single source of truth for the spec table (IMAGE_RES_SPECS): file name / max size / quality
             for filename, max_size, save_kwargs in IMAGE_RES_SPECS.values():
                 copy = img.copy()
                 if max_size:

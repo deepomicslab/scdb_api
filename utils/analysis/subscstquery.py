@@ -9,13 +9,13 @@ import utils.slurm_api as slurm_api
 
 class SubScstquery(Module):
     def __init__(self, subtask_type, root_dir, dataset_uuid, dataset_path, st_h5ad_path, params):
-        # 自理目录：/user_dir/dataset_path/subtask_name
+        # Self-managed directory: /user_dir/dataset_path/subtask_name
         self.params = params
         self.subtask_type = subtask_type
         self.dataset_uuid = dataset_uuid
         self._dataset_path = dataset_path
-        userid = params['userid']  # 假设传 userid（或从 main_userpath 解析）
-        super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
+        userid = params['userid']  # assumes userid is passed (or parse from main_userpath)
+        super().__init__(name='scst_subtask', userpath=root_dir)  # the base class prepends USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
         self.user_main_dir = user_main_dir
 
@@ -28,12 +28,13 @@ class SubScstquery(Module):
 
 
 
-        # 2. 关键：数据继承/文件复制
-        # 假设主任务的输入文件位于：主任务路径/upload/input.h5ad
+        # 2. Key: data inheritance / file copy
+        # The main task's input file is at: main task path/upload/input.h5ad
         main_input_h5ad_path = os.path.join(user_main_dir, 'upload/input.h5ad') 
         # sub_h5ad_path = os.path.join(self.path, 'upload/input.h5ad')
 
-        # 小种类区分（if-else）, TODO 不同种类的把不同的脚本路径和参数写入self.shell_script, self.script_arguments中
+        # Subtask type dispatch (if-else); TODO: write the per-type script path
+        # and arguments into self.shell_script, self.script_arguments
         sub_type = params.get('sub_type', 'default')
         # inputfilepath = self.path + '/upload/input.h5ad'
         inputfilepath = main_input_h5ad_path
@@ -190,30 +191,32 @@ class SubScstquery(Module):
                 'population_size': population_size,
             }
 
-            # 产物路径: SC CellChat
+            # Output path: SC CellChat
             cellchat_base = os.path.join(user_main_dir, f'dataset_{dataset_uuid}', 'subtask_cellchat', 'result')
             self._sc_cellchat_rds = os.path.join(cellchat_base, 'sc', 'cellchat_result.rds')
             self._sc_cellchat_exists = os.path.exists(self._sc_cellchat_rds)
 
-            # 产物路径: SC+ST CellChat
+            # Output path: SC+ST CellChat
             self._st_cellchat_rds = os.path.join(cellchat_base, 'sc_st_mapping', mapping_method, 'cellchat_result.rds')
             self._st_cellchat_exists = os.path.exists(self._st_cellchat_rds)
 
-            # 后处理输出路径
-            # 注意: shell 脚本 run_lr_comparison_postprocess.sh 会在 OUTPUT_DIR 下再拼一层
-            # "spearman" 作为 spearman_down_stream_gene.py 的输出目录, 所以这里只传 result 根目录,
-            # 避免产生 result/spearman/spearman 双层路径 (与后端 getLRSpearmanData 读取路径保持一致)。
+            # Postprocess output path
+            # Note: the shell script run_lr_comparison_postprocess.sh appends another
+            # "spearman" layer under OUTPUT_DIR as the output directory of
+            # spearman_down_stream_gene.py, so only the result root is passed here,
+            # avoiding a result/spearman/spearman double path (kept consistent with
+            # the backend getLRSpearmanData read path).
             lr_base = os.path.join(self.path, 'result')
             self._sc_spearman_dir = os.path.join(lr_base, '')
             self._st_spearman_dir = os.path.join(lr_base, 'sc_st_mapping', mapping_method, '')
             os.makedirs(lr_base, exist_ok=True)
             os.makedirs(os.path.join(lr_base, 'sc_st_mapping', mapping_method), exist_ok=True)
 
-            # 输入数据
+            # Input data
             self._sc_input_h5ad = main_input_h5ad_path
             self._st_input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
 
-            self.shell_script = None  # process() 会直接调用 submit_job
+            self.shell_script = None  # process() calls submit_job directly
         elif self.subtask_type == 'scst_mapping':
             mapping_method = self.params.get('mapping_method', 'cytospace')
             if mapping_method == 'cytospace':
@@ -236,12 +239,12 @@ class SubScstquery(Module):
             else:
                 self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
         else:
-            raise ValueError(f"不支持的小种类: {subtask_type}")
+            raise ValueError(f"Unsupported subtask type: {subtask_type}")
 
     def _check_running_cellchat(self):
         from django.db.models import Q
-        # SubTask.dataset_path 存的是 dataset_id（见 services.create_subtask），
-        # 故按 params 里的 dataset_id 过滤，而非 marker 路径
+        # SubTask.dataset_path stores the dataset_id (see services.create_subtask),
+        # so filter by the dataset_id in params, not the marker path
         running = SubTask.objects.filter(
             main_task__userpath=self.user_main_dir.replace(local_settings.USERTASKPATH, ''),
             subtask_type='cellchat',
@@ -317,14 +320,14 @@ class SubScstquery(Module):
             else:
                 self.params['_st_cellchat_job_id'] = None
 
-            # 3. 合并后处理
+            # 3. Combined post-processing
             post_args = [
                 self._sc_input_h5ad,          # $1: SC h5ad
                 self._sc_cellchat_rds,        # $2: SC rds
                 self._st_input_h5ad,          # $3: ST h5ad
                 self._st_cellchat_rds,        # $4: ST rds
-                self._sc_spearman_dir,        # $5: SC spearman 输出目录
-                self._st_spearman_dir,        # $6: ST spearman 输出目录
+                self._sc_spearman_dir,        # $5: SC spearman output directory
+                self._st_spearman_dir,        # $6: ST spearman output directory
                 self._lr_cluster_key,         # $7: cluster_key
             ]
             post_job_id = slurm_api.submit_job(
@@ -363,12 +366,12 @@ class SubScstquery(Module):
                 return self.getHierarchicalClusteringMarkerGenes(query_params.get('dataset'), query_params.get('cluster'))
         elif sub_type == 'marker_genes':
             if resulttype == 'markerExpression':
-                # 自定义
-                return {'results': '标记基因数据', 'status': 'success'}
-        # 默认或复用基类（如果有通用）
+                # custom
+                return {'results': 'Marker gene data', 'status': 'success'}
+        # Default: reuse the base class (if there is a generic one)
         else:
             expressionfile = self.path + '/result/scquery/sc_output_expression.csv'
             if os.path.exists(expressionfile):
                 expression = pd.read_csv(expressionfile, index_col=0)
                 return {'results': expression.to_dict(orient='records')}
-            return {'error': '结果文件不存在'}
+            return {'error': 'Result file not found'}

@@ -3,20 +3,20 @@ import anndata as ad
 import numpy as np
 from functools import lru_cache
 
-# 缓存最近读取的 3 个文件，防止反复读硬盘
+# Cache the 3 most recently read files to avoid repeated disk reads
 @lru_cache(maxsize=3)
 def load_scatter_data(file_full_path):
     """
-    只读取用于画图的坐标和元数据
+    Only read the coordinates and metadata needed for plotting
     """
     if not os.path.exists(file_full_path):
         return None
 
     try:
-        # backed='r' 是速度的关键，不把整个文件读入内存
+        # backed='r' is the key to speed: it does not load the whole file into memory
         adata = ad.read_h5ad(file_full_path, backed='r')
         
-        # 1. 找坐标 (UMAP / TSNE)
+        # 1. Find the coordinates (UMAP / TSNE)
         keys = adata.obsm.keys()
         coords = None
         if 'X_umap' in keys: coords = adata.obsm['X_umap']
@@ -25,27 +25,27 @@ def load_scatter_data(file_full_path):
         if coords is None:
             return {}
 
-        # 2. 找元数据 (Cluster, CellType, Donor)
+        # 2. Find the metadata (Cluster, CellType, Donor)
         df = adata.obs.copy()
         
-        # 数据清洗 (JSON 不支持 NaN)
+        # Data cleaning (JSON does not support NaN)
         df = df.replace({np.nan: None})
-        # 转换 category 为 str
+        # Convert categories to str
         for col in df.select_dtypes(include=['category']).columns:
             df[col] = df[col].astype(str)
 
-        # 3. 拼装结果
-        # 格式: { "barcode1": {"x": 1.2, "y": 3.4, "cell_type": "T-Cell"}, ... }
+        # 3. Assemble the result
+        # Format: { "barcode1": {"x": 1.2, "y": 3.4, "cell_type": "T-Cell"}, ... }
         result = {}
-        # 为了性能，这里使用 numpy 迭代
+        # Iterate with numpy for performance
         obs_names = adata.obs_names
         obs_dict = df.to_dict(orient='index')
         
         for i, barcode in enumerate(obs_names):
             result[barcode] = {
-                'x': float(coords[i][0]), # 确保是 float
+                'x': float(coords[i][0]), # make sure it is a float
                 'y': float(coords[i][1]),
-                **obs_dict[barcode]       # 合并 metadata
+                **obs_dict[barcode]       # merge the metadata
             }
             
         return result

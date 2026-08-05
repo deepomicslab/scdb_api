@@ -13,12 +13,12 @@ from .models import Dataset, GlobalStat
 from utils.spatial_calibration import read_spatial_calibration
 
 # ================================
-# 1. 全局统计 (Hero Stats) - 极快
+# 1. Global stats (Hero Stats) - very fast
 # ================================
 @api_view(['GET'])
 def global_stats(request):
     """
-    对应页面顶部的 4 个大数字
+    Corresponds to the 4 big numbers at the top of the page
     """
     gs = GlobalStat.objects.first()
     
@@ -38,7 +38,7 @@ def global_stats(request):
     return Response({'status': 'success', 'data': data})
 
 # ================================
-# 2. 器官统计 (Organ List & Charts) - SQL 聚合
+# 2. Organ stats (Organ List & Charts) - SQL aggregation
 # ================================
 @api_view(['GET'])
 def organ_stats(request):
@@ -69,12 +69,12 @@ def organ_stats(request):
     return Response({'status': 'success', 'data': agg_result})
 
 # ================================
-# 3. 数据集表格 (Table List) - 较慢
+# 3. Dataset table (Table List) - slower
 # ================================
 @api_view(['GET'])
 def dataset_list(request):
     """
-    返回底部表格的完整数据
+    Return the full data for the bottom table
     """
     datasets = Dataset.objects.all().values(
         'dataset_id', 
@@ -93,7 +93,7 @@ def dataset_list(request):
     return Response({'status': 'success', 'data': list(datasets)})
 
 # ================================
-# 4. 细胞类型统计 (饼图) - 带缓存
+# 4. Cell type stats (pie chart) - cached
 # ================================
 _celltype_cache = {}
 _celltype_cache_time = {}
@@ -134,7 +134,7 @@ def celltype_stats(request):
     return Response({'status': 'success', 'data': result_list})
 
 # ================================
-# 5. 详情页 Info (保持不变)
+# 5. Detail page Info (unchanged)
 # ================================
 @api_view(['GET'])
 def detail_info(request, dataset_id):
@@ -157,7 +157,7 @@ def detail_info(request, dataset_id):
         return Response({'status': 'error', 'message': 'Dataset not found'}, status=404)
 
 # ================================
-# 6. 详情页 Scatter (向量化 + 长 TTL 缓存)
+# 6. Detail page Scatter (vectorized + long TTL cache)
 # ================================
 _scatter_cache = {}
 _SCATTER_CACHE_TTL = 3600
@@ -175,9 +175,11 @@ def _scatter_first_truthy(df, cols):
 
 
 def _h5ad_obs_cols(f, target_cols):
-    """h5py 直读 h5ad /obs 指定列（绕开 scanpy 全量加载 uns 图片，首次提速）。
+    """Read the given /obs columns directly with h5py (bypasses scanpy's full
+    load of uns images, speeding up the first call).
 
-    categorical 列在 h5ad 中为 Group（codes + categories），字符串/数值列为 Dataset。
+    Categorical columns are Groups in h5ad (codes + categories); string/numeric
+    columns are Datasets.
     """
     obs = f['obs']
     data = {}
@@ -191,8 +193,8 @@ def _h5ad_obs_cols(f, target_cols):
             if categories.dtype.kind == 'S':
                 categories = np.array([c.decode('utf-8', 'replace') for c in categories])
             elif categories.dtype.kind == 'O':
-                # categories 元素可能是原始 bytes（object dtype），
-                # 直接赋值会给 vals 留下 bytes → astype(str) 变成 "b'B cell'"
+                # categories elements may be raw bytes (object dtype); assigning
+                # them directly leaves bytes in vals -> astype(str) would yield "b'B cell'"
                 categories = np.array(
                     [c.decode('utf-8', 'replace') if isinstance(c, bytes) else c for c in categories]
                 )
@@ -206,8 +208,8 @@ def _h5ad_obs_cols(f, target_cols):
             if v.dtype.kind == 'S':
                 v = np.array([x.decode('utf-8', 'replace') for x in v])
             elif v.dtype.kind == 'O':
-                # object dtype 数组元素可能是 bytes（未解码的字符串列），
-                # 直接 astype(str) 会得到 "b'unknown'" 形式的 repr
+                # object-dtype array elements may be bytes (undecoded string columns);
+                # astype(str) directly would produce reprs like "b'unknown'"
                 v = np.array(
                     [x.decode('utf-8', 'replace') if isinstance(x, bytes) else x for x in v],
                     dtype=object,
@@ -295,12 +297,12 @@ def detail_scatter(request, dataset_id):
     
 
 # ================================
-# 7. 下载 H5AD 文件接口 (新增)
+# 7. Download H5AD file endpoint (new)
 # ================================
 @api_view(['GET'])
 def download_h5ad(request, dataset_id):
     """
-    流式下载 .h5ad 文件
+    Stream the .h5ad file
     """
     try:
         ds = Dataset.objects.get(dataset_id=dataset_id)
@@ -309,15 +311,16 @@ def download_h5ad(request, dataset_id):
         if not os.path.exists(file_path):
             return Response({'status': 'error', 'message': 'File not found on server'}, status=404)
 
-        # 打开文件句柄
-        # FileResponse 会自动关闭文件，并处理 Content-Length 等头信息
+        # Open the file handle
+        # FileResponse closes the file automatically and handles headers such as Content-Length
         file_handle = open(file_path, 'rb')
         response = FileResponse(file_handle)
-        # GB 级 h5ad 流式 gzip 会打爆 CPU——显式 identity 让 GZipMiddleware 跳过
+        # Streaming gzip on a GB-scale h5ad would blow up the CPU - explicit
+        # identity lets GZipMiddleware skip it
         response['Content-Encoding'] = 'identity'
         
-        # 设置下载的文件名 (浏览器下载时显示的名字)
-        # 这里默认用 {dataset_id}.h5ad
+        # Set the download file name (the name shown by the browser when downloading)
+        # Defaults to {dataset_id}.h5ad here
         filename = f"{ds.dataset_id}.h5ad"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         
@@ -330,7 +333,7 @@ def download_h5ad(request, dataset_id):
 
 
 # ================================
-# 8. 基因表达检索（单数据集逐 spot）
+# 8. Gene expression lookup (per-spot, single dataset)
 # ================================
 _gene_spot_cache = {}
 _GENE_CACHE_TTL = 3600
@@ -356,7 +359,7 @@ def _h5ad_str_array(arr):
 
 
 def _var_col_values(f, col):
-    """读 var 列的值（支持 categorical Group / Dataset），返回 str 数组。"""
+    """Read the values of a var column (supports categorical Group / Dataset), returns a str array."""
     obj = f['var'][col]
     if isinstance(obj, h5py.Group):
         codes = np.asarray(obj['codes'][:])
@@ -370,7 +373,7 @@ def _var_col_values(f, col):
 
 
 def _strip_ensembl_suffix(names):
-    """feature_name 形如 'A1BG_ENSG00000121410' -> 'A1BG'；无 _ENSG 后缀原样返回。"""
+    """feature_name looks like 'A1BG_ENSG00000121410' -> 'A1BG'; returned unchanged if there is no _ENSG suffix."""
     cleaned = np.empty(len(names), dtype=object)
     for i, n in enumerate(names):
         if '_ENSG' in n:
@@ -381,9 +384,10 @@ def _strip_ensembl_suffix(names):
 
 
 def _find_gene_col(f, gene):
-    """在 var 中定位基因列。依次尝试 index 列 / gene_symbols / gene_ids / feature_name，
-    先精确匹配再忽略大小写；feature_name 额外剥离 '_ENSG' 后缀（CELLxGENE 拼接格式）。
-    返回 (列号, 匹配来源) 或 (None, None)。"""
+    """Locate the gene column in var. Tries the index column / gene_symbols /
+    gene_ids / feature_name in order, exact match first then case-insensitive;
+    feature_name additionally strips the '_ENSG' suffix (CELLxGENE concatenated format).
+    Returns (column index, match source) or (None, None)."""
     index_col = _h5ad_attr_str(f['var'].attrs, '_index', '_index')
     candidates = [index_col] if index_col in f['var'] else []
     for extra in ('gene_symbols', 'gene_ids', 'feature_name'):
@@ -411,7 +415,7 @@ def _find_gene_col(f, gene):
 
 
 def _extract_gene_column(f, col_idx):
-    """从 X 提取第 col_idx 个基因的表达向量（支持 csr / csc / dense）。"""
+    """Extract the expression vector of the col_idx-th gene from X (supports csr / csc / dense)."""
     X = f['X']
     if isinstance(X, h5py.Group):
         indptr = np.asarray(X['indptr'][:])
@@ -434,7 +438,7 @@ def _extract_gene_column(f, col_idx):
 
 @api_view(['GET'])
 def dataset_gene_expression(request, dataset_id):
-    """单数据集逐 spot 基因表达（只返回非零 spot，供散点着色）。
+    """Per-spot gene expression for a single dataset (returns only non-zero spots, for scatter coloring).
 
     GET /dataset/detail/<id>/gene/?gene=CD68
     """
@@ -498,7 +502,7 @@ def dataset_gene_expression(request, dataset_id):
 
 
 # ================================
-# 9. 基因名建议（Gene 选择器下拉）
+# 9. Gene name suggestions (Gene selector dropdown)
 # ================================
 _gene_suggest_cache = {}
 _GENE_SUGGEST_TTL = 300
@@ -506,7 +510,8 @@ _GENE_SUGGEST_TTL = 300
 
 @api_view(['GET'])
 def dataset_gene_suggest(request, dataset_id):
-    """单数据集基因名建议（详情页基因着色选择器的下拉候选）。
+    """Gene name suggestions for a single dataset (dropdown candidates for the
+    gene-coloring selector on the detail page).
 
     GET /dataset/detail/<id>/gene/suggest/?q=CD&limit=20
     """

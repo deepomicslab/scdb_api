@@ -17,7 +17,7 @@ class taskSerializer(serializers.ModelSerializer):
     # subtasks = serializers.SerializerMethodField()
     class Meta:
         model = tasks
-        # userpath 含服务器工作区路径，不下发给前端
+        # userpath contains a server workspace path; never expose it to the frontend
         fields = ['id','name', 'user', 'task_type', 'modulelist', 'status', 'created_at']
     
     # def get_subtasks(self, obj):

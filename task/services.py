@@ -83,7 +83,8 @@ def _chain_prerequisite(cls, prereq_type, usertask_dir, dataset_uuid,
 def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     """Create and submit a subtask.
 
-    服务端按 dataset_id 反查 marker 路径，不再接收客户端传来的服务器路径。
+    The server resolves the marker path by dataset_id; it no longer accepts a
+    server path sent by the client.
     Returns dict: {'status', 'message', 'data': {'subtaskid'}}
     Raises ValueError for validation failures.
     """
@@ -170,6 +171,6 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
 
     return {
         'status': 'Success',
-        'message': '子任务创建成功',
+        'message': 'Subtask created successfully',
         'data': {'subtaskid': new_subtask.id},
     }

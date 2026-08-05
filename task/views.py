@@ -71,7 +71,7 @@ def createtask(request):
     os.makedirs(uploadfilepath, exist_ok=False)
     # file = request.FILES['submitfile']
     # default_storage.save(uploadfilepath+'input.h5ad', ContentFile(file.read()))
-    # 确保 request.FILES 中有 'submitfile'
+    # Make sure 'submitfile' is in request.FILES
     if 'submitfile' in request.FILES:
         try:
             file = request.FILES['submitfile']
@@ -86,7 +86,7 @@ def createtask(request):
 
         
     else:
-        # 如果文件缺失，应返回错误
+        # If the file is missing, return an error
         return Response({'status': 'Failed', 'message': 'File "submitfile" not found in request.'}, status=400)
     # import shutil
     # shutil.copy("/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1745249986_9226/upload/input.h5ad", uploadfilepath+'input.h5ad')
@@ -152,7 +152,7 @@ def taskdetailview(request):
         return Response({'status': 'error', 'message': 'Task not found'}, status=404)
     serializer = taskSerializer(taskobject, many=True)
     taskdata=serializer.data[0]
-    # 不再下发 userpath / inputpath / outputpath（含服务器工作区路径）
+    # No longer expose userpath / inputpath / outputpath (they contain server workspace paths)
     return Response({'results': taskdata})
 
 @api_view(['GET'])
@@ -229,16 +229,19 @@ def taskresultview(request):
     return Response(res)
 
 
-# getImg 浏览器缓存：URL 按 dataset_id/resolution 稳定，图片内容在数据集重导入前不变。
-# max-age=86400（1 天）：重导入数据集后旧图最多滞后 1 天（或用户强制刷新即失效）。
+# getImg browser cache: the URL is stable per dataset_id/resolution, and the image content
+# does not change until the dataset is re-imported.
+# max-age=86400 (1 day): after a dataset re-import, stale images lag at most 1 day
+# (or until the user forces a refresh).
 _IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
 
 
 def _img_file_response(path, content_type):
-    """图片 FileResponse：显式 Content-Encoding: identity 让 GZipMiddleware 跳过。
+    """Image FileResponse: explicit Content-Encoding: identity makes GZipMiddleware skip it.
 
-    JPEG 已压缩，流式 gzip 白耗 CPU 且不减大小；identity 头是 Django 官方
-    让 GZipMiddleware 跳过的机制（已有 Content-Encoding 的响应不再压缩）。
+    JPEG is already compressed; streaming gzip wastes CPU without reducing size. The
+    identity header is Django's official mechanism for making GZipMiddleware skip a
+    response (responses that already have Content-Encoding are not compressed again).
     """
     resp = FileResponse(open(path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
     resp['Content-Encoding'] = 'identity'
@@ -246,11 +249,15 @@ def _img_file_response(path, content_type):
 
 
 def _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
-    """确保目标分辨率图片存在且符合当前尺寸常量，不符则从 hires.jpg 压缩重建。
+    """Ensure the target-resolution image exists and matches the current size constants,
+    rebuilding it from hires.jpg by downscaling if not.
 
-    - target = min(max_size, hires 长边)（源图比常量小时 thumbnail 不会放大）；
-    - 当前文件长边与 target 偏差 >1px 视为过期 → 重建（不解码像素，仅读头部）；
-    - 返回 True 表示文件可用（存在且尺寸符合）；False 表示无法从 hires 得到。
+    - target = min(max_size, hires long edge) (when the source is smaller than the
+      constant, the thumbnail is not upscaled);
+    - if the current file's long edge deviates from target by >1px it is considered
+      stale -> rebuild (no pixel decoding, only reads the header);
+    - returns True when the file is usable (exists and matches size); False when it
+      cannot be derived from hires.
     """
     import os
     from PIL import Image
@@ -270,10 +277,10 @@ def _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
             if abs(cur_long - target) <= 1:
                 return True
         elif max_size is None:
-            # original 档：hires 本身即目标
+            # original tier: hires itself is the target
             return True
 
-        # 重建：压缩 hires.jpg（不解码像素为数组，仅 LANCZOS 缩放 + 重新编码）
+        # Rebuild: downscale hires.jpg (no pixel-array decoding, just LANCZOS resize + re-encode)
         with Image.open(hires_path) as himg:
             img = himg.copy()
             if max_size:
@@ -312,10 +319,10 @@ def getImg(request):
         if not ds:
             return Response({'message': "No image for this dataset."}, status=404)
 
-        # 3 档 resolution（规格表单一来源）：
-        #   thumbnail : 400x400 JPEG q75  (~13KB)  — 卡片缩略图
-        #   medium    : 800x800 JPEG q80  (~50-100KB) — 散点图底图（默认）
-        #   original  : 完整分辨率 JPEG q85 (~1MB)   — 高清 opt-in
+        # 3 resolution tiers (the spec table is the single source of truth):
+        #   thumbnail : 400x400 JPEG q75  (~13KB)  - card thumbnail
+        #   medium    : 800x800 JPEG q80  (~50-100KB) - scatter base image (default)
+        #   original  : full-resolution JPEG q85 (~1MB) - high-res opt-in
         key = resolution if resolution in IMAGE_RES_SPECS else 'medium'
         filename, max_size, save_kwargs = IMAGE_RES_SPECS[key]
         content_type = 'image/jpeg'
@@ -324,7 +331,8 @@ def getImg(request):
         cache_path = os.path.join(settings.MEDIA_ROOT, image_dir, filename)
         hires_path = os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg')
 
-        # 优先：从 hires.jpg 校验/重建（thumbnail/medium 档，MEDIUM_MAX_SIZE 变动自动跟上）
+        # Preferred path: validate/rebuild from hires.jpg (thumbnail/medium tiers;
+        # automatically follows MEDIUM_MAX_SIZE changes)
         if _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
             if not ds.image_dir:
                 Dataset.objects.filter(dataset_id=ds.dataset_id).update(
@@ -332,9 +340,9 @@ def getImg(request):
                 )
             return _img_file_response(cache_path, content_type)
 
-        # 兜底：hires.jpg 也不存在 → 从 h5ad 提图（自举路径）
+        # Fallback: hires.jpg also missing -> extract the image from h5ad (self-healing path)
         if not os.path.exists(cache_path):
-            # 提取：从 h5ad 提图 → 存 media → 自愈写回 image_dir
+            # Extract: pull image from h5ad -> save to media -> self-healing write-back of image_dir
             try:
                 import h5py
                 from PIL import Image
@@ -351,7 +359,7 @@ def getImg(request):
                                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                                 img.save(cache_path, 'JPEG', **save_kwargs)
                                 if not ds.image_dir:
-                                    # 首次提取：写回 image_dir，后续直读
+                                    # First extraction: write back image_dir so later requests read directly
                                     Dataset.objects.filter(dataset_id=ds.dataset_id).update(
                                         image_dir=f'st/{ds.dataset_id}'
                                     )
@@ -367,15 +375,16 @@ def getImg(request):
 @api_view(['POST'])
 def create_subtask(request):
     """
-    创建 scst 子任务
-    - taskid (主任务 ID)
+    Create an scst subtask
+    - taskid (main task ID)
     - userid
-    - dataset_id (数据集 ID，如 Kidney_Cancer_001)
-    - subtasktype (子任务类型)
-    - parameters (JSON 字符串)
+    - dataset_id (dataset ID, e.g. Kidney_Cancer_001)
+    - subtasktype (subtask type)
+    - parameters (JSON string)
 
-    注意：不再接收客户端传来的服务器路径（dataset_path），
-    需要 marker 路径时由服务端按 dataset_id 反查，避免路径泄露/注入。
+    Note: the server path (dataset_path) sent by the client is no longer accepted;
+    when a marker path is needed, the server looks it up by dataset_id to avoid
+    path leakage/injection.
     """
     taskid = request.data.get('taskid')
     userid = request.data.get('userid')
@@ -383,16 +392,16 @@ def create_subtask(request):
     subtasktype = request.data.get('subtasktype')
 
     if not taskid or not userid or not dataset_id or not subtasktype:
-        return Response({'status': 'Failed', 'message': '缺少 taskid、userid、dataset_id 或 subtasktype'}, status=400)
+        return Response({'status': 'Failed', 'message': 'Missing taskid, userid, dataset_id or subtasktype'}, status=400)
 
     try:
         main_task = tasks.objects.get(id=taskid, user=userid)
     except tasks.DoesNotExist:
-        return Response({'status': 'Failed', 'message': '任务不存在'}, status=404)
+        return Response({'status': 'Failed', 'message': 'Task not found'}, status=404)
 
     parameters_string = request.data.get('parameters')
     if not parameters_string:
-        return Response({'status': 'Failed', 'message': '缺少 parameters'}, status=400)
+        return Response({'status': 'Failed', 'message': 'Missing parameters'}, status=400)
     try:
         parameters_dict = json.loads(parameters_string)
     except (json.JSONDecodeError, TypeError) as e:
@@ -406,24 +415,24 @@ def create_subtask(request):
         return Response({'status': 'Failed', 'message': str(e)}, status=400)
     except Exception as e:
         traceback.print_exc()
-        return Response({'status': 'Failed', 'message': f'子任务创建失败：{str(e)}'})
+        return Response({'status': 'Failed', 'message': f'Subtask creation failed: {str(e)}'})
 
 # view.py
 @api_view(['GET'])
 def subtask_status_update(request):
     """
-    按需获取并更新子任务的实时状态 (不依赖 PKL 文件)。
-    参数: subtaskid
+    Fetch and update a subtask's live status on demand (does not depend on the PKL file).
+    Parameters: subtaskid
     """
     subtaskid = request.query_params.get('subtaskid')
 
     if not subtaskid:
-        return Response({'status': 'Failed', 'message': '缺少 subtaskid 参数。'}, status=400)
+        return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
 
     try:
         subtask = SubTask.objects.get(id=subtaskid)
     except SubTask.DoesNotExist:
-        return Response({'status': 'Failed', 'message': f'ID 为 {subtaskid} 的子任务不存在。'}, status=404)
+        return Response({'status': 'Failed', 'message': f'Subtask with ID {subtaskid} not found.'}, status=404)
 
     current_db_status = subtask.status or ''
     job_id = subtask.job_id
@@ -515,7 +524,7 @@ def subtask_status_update(request):
         return Response({
             'status': 'Success',
             'current_status': current_db_status,
-            'message': '任务 Job ID 丢失。'
+            'message': 'Task job ID missing.'
         })
 
     # 4. Query SLURM and update
@@ -526,7 +535,7 @@ def subtask_status_update(request):
                 'status': 'Success',
                 'current_status': current_db_status,
                 'job_id': job_id,
-                'message': 'SLURM 状态暂时无法查询，维持当前状态。'
+                'message': 'SLURM status temporarily unavailable, keeping the current status.'
             })
 
         new_status = normalize_slurm_status(raw_status)
@@ -539,12 +548,12 @@ def subtask_status_update(request):
             'status': 'Success',
             'current_status': new_status,
             'job_id': job_id,
-            'message': f'状态已更新至 {new_status}'
+            'message': f'Status updated to {new_status}'
         })
 
     except Exception as e:
         traceback.print_exc()
-        return Response({'status': 'Failed', 'message': f'SLURM 状态查询失败: {str(e)}'}, status=500)
+        return Response({'status': 'Failed', 'message': f'Failed to query SLURM status: {str(e)}'}, status=500)
 @api_view(['GET'])
 def subtask_log(request):
     """Return the last 500 lines of a subtask's SLURM log file."""
