@@ -16,7 +16,6 @@ class Scstquery(Module, CommonMixin, HEScatterMixin, HierarchicalClusteringMixin
                 CommotMixin, CellChatMixin, SpiderMixin, AlphaTalkMixin, DispatchMixin):
     def __init__(self, name, path, params):
         super().__init__(name, path)
-        print('params', params)
         inputfilepath = local_settings.USERTASKPATH + path + '/upload/input.h5ad'
         outputdir = local_settings.USERTASKPATH + path + '/result/'
         paramk = str(params['k'])
@@ -28,4 +27,3 @@ class Scstquery(Module, CommonMixin, HEScatterMixin, HierarchicalClusteringMixin
         elif params['processType'] == "celltype":
             self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'cell_type', organs, disease]
         self.shell_script = local_settings.SCDB_MODULE + 'scst_query/run.sh'
-        print(self.shell_script, self.script_arguments)

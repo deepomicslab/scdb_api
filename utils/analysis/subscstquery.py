@@ -18,12 +18,10 @@ class SubScstquery(Module):
         super().__init__(name='scst_subtask', userpath=root_dir)  # 基类会 prepend USERTASKPATH
         user_main_dir = self.path  # USERTASKPATH + root_dir
         self.user_main_dir = user_main_dir
-        print("user_main_dir", user_main_dir)
 
         if dataset_uuid:
             sub_dir = f"dataset_{dataset_uuid}/subtask_{subtask_type.replace(' ', '_')}"
             self.path = os.path.join(user_main_dir, sub_dir)
-            print(self.path)
             os.makedirs(self.path, exist_ok=True)
             os.makedirs(os.path.join(self.path, 'upload'), exist_ok=True)
             os.makedirs(os.path.join(self.path, 'result'), exist_ok=True)

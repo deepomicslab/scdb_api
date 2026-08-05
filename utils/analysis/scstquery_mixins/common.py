@@ -158,7 +158,6 @@ class CommonMixin:
             filepath = os.path.join(self.path, 'result/meta', filename)
         elif filename.endswith('.csv'):
             filepath = os.path.join(self.path, 'result/sc_marker', filename)
-        print(filepath)
         if os.path.exists(filepath):
             try:
                 with open(filepath, 'rb') as f:

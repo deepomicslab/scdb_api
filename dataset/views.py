@@ -290,7 +290,7 @@ def detail_scatter(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print(e)
+        print('[detail_scatter]', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)
     
 
@@ -493,7 +493,7 @@ def dataset_gene_expression(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print(e)
+        print('[gene_expression]', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)
 
 
@@ -567,5 +567,5 @@ def dataset_gene_suggest(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print(e)
+        print('[gene_suggest]', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)

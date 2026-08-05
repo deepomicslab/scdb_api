@@ -187,7 +187,6 @@ class Module:
         if self.shell_script is None:
             raise ValueError("Shell script is not set. Cannot process module.")
         if len(self.dependencies) == 0:
-            #print(self.shell_script,self.script_arguments)
             self.job_id = slurm_api.submit_job(self.shell_script,script_arguments=self.script_arguments)
         else:
             dependencies_jobs = [dependency.job_id for dependency in self.dependencies if dependency.job_id is not None]

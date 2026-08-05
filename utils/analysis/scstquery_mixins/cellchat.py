@@ -38,8 +38,6 @@ class CellChatMixin:
         if lrpair:
             cmd.append(f"--lrpair={lrpair}")
 
-        print("Running command:", " ".join(cmd))
-
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             if os.path.exists(output_file):
@@ -54,7 +52,6 @@ class CellChatMixin:
                 return output
             except json.JSONDecodeError as e:
                 os.unlink(output_file)
-                print("Raw R output:\n", result.stdout)
                 raise e
         else:
             raise RuntimeError("Output file not created")

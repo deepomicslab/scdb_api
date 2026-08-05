@@ -64,12 +64,6 @@ def createtask(request):
     - modulename
     - parameters
     """
-    print("receive request create task.")
-    print("METHOD:", request.method)
-    print("CONTENT_TYPE:", request.content_type)
-    print("DATA:", request.data)
-    print("FILES:", request.FILES)
-
     # create user task folder and save the file
     usertask_dir = str(int(time.time()))+'_' + str(random.randint(1000, 9999))
     userpath = local_settings.USERTASKPATH+usertask_dir
@@ -192,7 +186,6 @@ def taskresultview(request):
     if not taskid:
         return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
     if 'testmode' in query_params and query_params['testmode'] == 'true':
-        print("testmode")
         from utils.analysis import Scstquery
         module = Scstquery.__new__(Scstquery)
         res = module.gettestresult(query_params)
