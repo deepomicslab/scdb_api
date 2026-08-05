@@ -198,6 +198,13 @@ def _h5ad_obs_cols(f, target_cols):
             v = np.asarray(obj[:])
             if v.dtype.kind == 'S':
                 v = np.array([x.decode('utf-8', 'replace') for x in v])
+            elif v.dtype.kind == 'O':
+                # object dtype 数组元素可能是 bytes（未解码的字符串列），
+                # 直接 astype(str) 会得到 "b'unknown'" 形式的 repr
+                v = np.array(
+                    [x.decode('utf-8', 'replace') if isinstance(x, bytes) else x for x in v],
+                    dtype=object,
+                )
             data[col] = v
     return data
 
@@ -333,6 +340,11 @@ def _h5ad_str_array(arr):
     a = np.asarray(arr)
     if a.dtype.kind == 'S':
         a = np.array([x.decode('utf-8', 'replace') for x in a])
+    elif a.dtype.kind == 'O':
+        a = np.array(
+            [x.decode('utf-8', 'replace') if isinstance(x, bytes) else x for x in a],
+            dtype=object,
+        )
     return a.astype(str)
 
 
