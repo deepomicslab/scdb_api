@@ -100,8 +100,18 @@ DATABASES = {
         'PASSWORD': os.environ.get('DB_PASSWORD', ''),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5432'),
+        'OPTIONS': {
+            # fail fast on PG connection storms/locks instead of hanging past the
+            # gunicorn timeout and getting all workers SIGKILLed in a loop
+            'connect_timeout': 10,
+            'options': '-c statement_timeout=60s',
+        },
     }
 }
+
+# Reuse PG connections between requests to reduce connection pressure on the
+# shared PostgreSQL server (many projects on this host share max_connections).
+CONN_MAX_AGE = 60
 
 
 # Password validation

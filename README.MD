@@ -26,13 +26,23 @@ python manage.py runserver <port>
 
 ## Production
 
-Gunicorn (no runserver, no systemd/supervisor):
+Gunicorn (no runserver, no systemd/supervisor). Launch via `run_prod.sh` inside
+the `scdb` env — it writes access/error logs to `logs/` and recycles workers
+every ~5000 requests:
 
 ```bash
-gunicorn scdb_api.wsgi:application --workers 4 --bind 127.0.0.1:<port> --preload --timeout 120
+conda activate scdb
+bash run_prod.sh
 ```
 
-Restart = kill the process and re-run the command.
+Restart = kill the gunicorn processes and re-run the script.
+
+Notes:
+- `--preload` runs `AppConfig.ready()` once in the master (background scheduled
+  sync thread lives in the master; workers are plain forks)
+- `DATABASES.OPTIONS` sets `connect_timeout=10` and `statement_timeout=60s` so a
+  PostgreSQL connection storm or lock fails the request fast instead of letting
+  all workers exceed the 120s timeout and get SIGKILLed in a loop
 
 ## R Service
 
