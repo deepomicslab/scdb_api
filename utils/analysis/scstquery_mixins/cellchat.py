@@ -57,7 +57,7 @@ class CellChatMixin:
             raise RuntimeError("Output file not created")
 
     
-    def _find_cellchat_rds(self, dataset, mapping_method=None):
+    def _find_cellchat_rds(self, dataset, mapping_method=None, input_source=None):
         """Locate the subtask_cellchat RDS file by dataset_id"""
         if getattr(self, '_is_demo', False):
             if mapping_method:
@@ -72,6 +72,11 @@ class CellChatMixin:
             db_obj = Dataset.objects.get(dataset_id=dataset)
         except Dataset.DoesNotExist:
             return None
+        if input_source == 'st':
+            if db_obj.precomputed_cellchat_path:
+                st_path = os.path.join(db_obj.precomputed_cellchat_path, 'cellchat_result.rds')
+                return st_path if os.path.exists(st_path) else None
+            return None
         base = os.path.join(self.path, f'dataset_{db_obj.title}', 'subtask_cellchat', 'result')
         if mapping_method:
             new_path = os.path.join(base, 'sc_st_mapping', mapping_method, 'cellchat_result.rds')
@@ -80,8 +85,8 @@ class CellChatMixin:
         old_path = os.path.join(base, 'cellchat_result.rds')
         return old_path if os.path.exists(old_path) else None
 
-    def getCellChatPathways(self, dataset=None, mapping_method=None):
-        rds_path = self._find_cellchat_rds(dataset, mapping_method)
+    def getCellChatPathways(self, dataset=None, mapping_method=None, input_source=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method, input_source)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         r_proxy = self._get_cellchat_proxy()
@@ -93,8 +98,8 @@ class CellChatMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatCircleData(self, pathway, dataset=None, mapping_method=None):
-        rds_path = self._find_cellchat_rds(dataset, mapping_method)
+    def getCellChatCircleData(self, pathway, dataset=None, mapping_method=None, input_source=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method, input_source)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         r_proxy = self._get_cellchat_proxy()
@@ -106,8 +111,8 @@ class CellChatMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatSpatialData(self, pathway, dataset=None, mapping_method=None):
-        rds_path = self._find_cellchat_rds(dataset, mapping_method)
+    def getCellChatSpatialData(self, pathway, dataset=None, mapping_method=None, input_source=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method, input_source)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         r_proxy = self._get_cellchat_proxy()
@@ -127,8 +132,8 @@ class CellChatMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatHeatmapData(self, LR_pair, dataset=None, mapping_method=None):
-        rds_path = self._find_cellchat_rds(dataset, mapping_method)
+    def getCellChatHeatmapData(self, LR_pair, dataset=None, mapping_method=None, input_source=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method, input_source)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         r_proxy = self._get_cellchat_proxy()
@@ -146,8 +151,8 @@ class CellChatMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getCellChatLRPairs(self, dataset=None, mapping_method=None):
-        rds_path = self._find_cellchat_rds(dataset, mapping_method)
+    def getCellChatLRPairs(self, dataset=None, mapping_method=None, input_source=None):
+        rds_path = self._find_cellchat_rds(dataset, mapping_method, input_source)
         if not rds_path:
             return {'data': {}, 'status': 'error', 'message': 'CellChat rds file not found'}
         r_proxy = self._get_cellchat_proxy()

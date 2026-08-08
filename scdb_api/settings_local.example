@@ -12,6 +12,12 @@ TANGRAM_SCRIPT = '/data3/platform/sc_db/tangram/run_slurm_tangram.sh'
 ALPHATALK_SCRIPT = '/data3/platform/sc_db/AlphaTalk/run_slurm_alphatalk.sh'
 LR_COMPARISON_POSTPROCESS_SCRIPT = '/data3/platform/sc_db/cellchat/run_lr_comparison_postprocess.sh'
 
+# Root directory for precomputed Original ST analysis results (commot/cellchat/
+# spider/alphatalk run on the raw ST h5ad, independent of any user task).
+# Per-dataset layout: {ST_PRECOMPUTED_ROOT}/{uuid}/subtask_{type}/result/st/
+# The per-dataset directory is stored back into Dataset.precomputed_*_path.
+ST_PRECOMPUTED_ROOT = '/data2/platform/scdb_platform/st_precomputed/'
+
 # SLURM log paths for subtask_log endpoint
 SLURM_LOG_PATHS = {
     ('scst_mapping', 'cytospace'): '/data3/platform/sc_db/1218test/cytospace/logs/cytospace_{job_id}.out',

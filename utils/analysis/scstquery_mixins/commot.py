@@ -38,7 +38,7 @@ def _load_commot_adata(file_path):
 class CommotMixin:
     """Commot cell-cell interaction result methods for Scstquery."""
 
-    def _get_commot_result_dir(self, dataset_name, mapping_method=None):
+    def _get_commot_result_dir(self, dataset_name, mapping_method=None, input_source=None):
         if getattr(self, '_is_demo', False):
             demo_dir = os.path.join(self.path, 'result', 'commot')
             if os.path.isdir(demo_dir):
@@ -46,6 +46,10 @@ class CommotMixin:
         try:
             from dataset.models import Dataset
             ds = Dataset.objects.get(dataset_id=dataset_name)
+            if input_source == 'st':
+                if ds.precomputed_commot_path:
+                    return ds.precomputed_commot_path
+                return None
             uuid = ds.title
             base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_commot', 'result')
             if mapping_method:
@@ -66,8 +70,8 @@ class CommotMixin:
         files = glob.glob(os.path.join(result_dir, pattern))
         return files[0] if files else None
 
-    def getLRPairs(self, dataset, mapping_method=None):
-        result_dir = self._get_commot_result_dir(dataset, mapping_method)
+    def getLRPairs(self, dataset, mapping_method=None, input_source=None):
+        result_dir = self._get_commot_result_dir(dataset, mapping_method, input_source)
         file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
         if not file_path:
             return {'LR_pairs': [], 'status': 'error', 'message': f'Commot result not found for {dataset}'}
@@ -80,8 +84,8 @@ class CommotMixin:
         res = {'LR_pairs': lr_pairs.tolist(), 'status': 'success'}
         return res
 
-    def getReceivedSignalStrength(self, dataset, lr_pair, mapping_method=None):
-        result_dir = self._get_commot_result_dir(dataset, mapping_method)
+    def getReceivedSignalStrength(self, dataset, lr_pair, mapping_method=None, input_source=None):
+        result_dir = self._get_commot_result_dir(dataset, mapping_method, input_source)
         file_path = self._find_commot_file(result_dir, '*_LR.h5ad')
         if not file_path:
             return {'receiver_strength': {}, 'status': 'error', 'message': f'Commot result not found for {dataset}'}
@@ -101,12 +105,23 @@ class CommotMixin:
         res = {'receiver_strength': df.to_dict(orient='index'), 'status': 'success'}
         return res
     
-    def getNetworkData(self, dataset, type, mapping_method=None):
-        base = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result")
-        if mapping_method:
-            method_base = os.path.join(base, "sc_st_mapping", mapping_method)
-        else:
+    def getNetworkData(self, dataset, type, mapping_method=None, input_source=None):
+        if input_source == 'st':
+            try:
+                from dataset.models import Dataset
+                ds = Dataset.objects.get(dataset_id=dataset)
+                base = ds.precomputed_cellchat_path
+            except Dataset.DoesNotExist:
+                return {'network_data': {}, 'status': 'error', 'message': f'File not found: {dataset}'}
+            if not base:
+                return {'network_data': {}, 'status': 'error', 'message': f'File not found: {dataset}'}
             method_base = base
+        else:
+            base = os.path.join(self.path, f"dataset_{dataset}", "subtask_cellchat", "result")
+            if mapping_method:
+                method_base = os.path.join(base, "sc_st_mapping", mapping_method)
+            else:
+                method_base = base
         if type == 'weight':
             file_path = os.path.join(method_base, "cellchat/network/result_data_weight.json")
         elif type == 'count':

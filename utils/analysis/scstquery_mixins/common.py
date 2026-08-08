@@ -91,6 +91,14 @@ class CommonMixin:
                 # getImg requests, avoiding no-image 404s spamming the logs
                 if db_obj:
                     new_value['has_image'] = db_obj.has_image()
+                    # Precomputed Original ST results availability (per tool):
+                    # the frontend enables/disables the "ST Reference" view entry
+                    new_value['st_precomputed'] = {
+                        'commot': bool(db_obj.precomputed_commot_path),
+                        'cellchat': bool(db_obj.precomputed_cellchat_path),
+                        'spider': bool(db_obj.precomputed_spider_path),
+                        'alphatalk': bool(db_obj.precomputed_alphatalk_path),
+                    }
 
                 _subtasks = subtask_map.get(db_obj.dataset_id if db_obj else None, {}) \
                     or subtask_map.get(original_path, {})

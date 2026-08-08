@@ -19,7 +19,11 @@ class SubScstquery(Module):
         user_main_dir = self.path  # USERTASKPATH + root_dir
         self.user_main_dir = user_main_dir
 
-        if dataset_uuid:
+        # st source (precomputed Original ST results) writes to the shared
+        # ST_PRECOMPUTED_ROOT instead of a user task directory, so no per-dataset
+        # subtask directories are created here for it.
+        is_st_source = params.get('input_source', 'mapped') == 'st'
+        if dataset_uuid and not is_st_source:
             sub_dir = f"dataset_{dataset_uuid}/subtask_{subtask_type.replace(' ', '_')}"
             self.path = os.path.join(user_main_dir, sub_dir)
             os.makedirs(self.path, exist_ok=True)
@@ -77,16 +81,20 @@ class SubScstquery(Module):
             self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
         elif subtask_type == "commot":
-            mapping_method = self.params.get('mapping_method', 'cytospace')
-            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
-            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            if is_st_source:
+                input_h5ad = st_h5ad_path
+                outputdir = os.path.join(local_settings.ST_PRECOMPUTED_ROOT, dataset_uuid, 'subtask_commot', 'result', 'st', '')
+            else:
+                mapping_method = self.params.get('mapping_method', 'cytospace')
+                input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+                outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
             os.makedirs(outputdir, exist_ok=True)
             signaling_type = params.get('signaling_type', 'Secreted Signaling')
             dis_thr = str(params.get('dis_thr', 500))
             min_cell_pct = str(params.get('min_cell_pct', 0.05))
             n_permutations = str(params.get('n_permutations', 100))
             self.script_arguments = [
-                mapping_h5ad,
+                input_h5ad,
                 outputdir,
                 signaling_type,
                 dis_thr,
@@ -104,17 +112,21 @@ class SubScstquery(Module):
             trim = str(params.get('trim', 0.1))
             interaction_range = str(params.get('interaction_range', 250))
 
-            mapping_method = self.params.get('mapping_method', 'cytospace')
-            if datatype == 'sc':
-                outputdir = os.path.join(self.path, 'result', 'sc', '')
+            if is_st_source:
+                input_h5ad = st_h5ad_path
+                outputdir = os.path.join(local_settings.ST_PRECOMPUTED_ROOT, dataset_uuid, 'subtask_cellchat', 'result', 'st', '')
             else:
-                outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+                mapping_method = self.params.get('mapping_method', 'cytospace')
+                if datatype == 'sc':
+                    outputdir = os.path.join(self.path, 'result', 'sc', '')
+                else:
+                    outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+                input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             os.makedirs(outputdir, exist_ok=True)
             output_filepath = os.path.join(outputdir, "cellchat_result.rds")
 
-            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
             self.script_arguments = [
-                mapping_h5ad,
+                input_h5ad,
                 output_filepath,
                 groupby,
                 db_mode,
@@ -138,12 +150,16 @@ class SubScstquery(Module):
             is_human = 'True' if species == 'human' else 'False'
             is_sc = 'True' if datatype_val == 'sc' else 'False'
 
-            mapping_method = self.params.get('mapping_method', 'cytospace')
-            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
-            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            if is_st_source:
+                input_h5ad = st_h5ad_path
+                outputdir = os.path.join(local_settings.ST_PRECOMPUTED_ROOT, dataset_uuid, 'subtask_spider', 'result', 'st', '')
+            else:
+                mapping_method = self.params.get('mapping_method', 'cytospace')
+                input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+                outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
             os.makedirs(outputdir, exist_ok=True)
             self.script_arguments = [
-                mapping_h5ad,
+                input_h5ad,
                 outputdir,
                 is_human,
                 is_sc,
@@ -153,12 +169,16 @@ class SubScstquery(Module):
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_spider.sh'
         elif subtask_type == "alphatalk":
             species = params.get('species', 'human').capitalize()
-            mapping_method = self.params.get('mapping_method', 'cytospace')
-            mapping_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
-            outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
+            if is_st_source:
+                input_h5ad = st_h5ad_path
+                outputdir = os.path.join(local_settings.ST_PRECOMPUTED_ROOT, dataset_uuid, 'subtask_alphatalk', 'result', 'st', '')
+            else:
+                mapping_method = self.params.get('mapping_method', 'cytospace')
+                input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
+                outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
             os.makedirs(outputdir, exist_ok=True)
             self.script_arguments = [
-                mapping_h5ad,
+                input_h5ad,
                 outputdir,
                 species,
             ]

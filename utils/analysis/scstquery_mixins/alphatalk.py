@@ -39,12 +39,17 @@ def _load_alphatalk_df(pkl_path):
 class AlphaTalkMixin:
     """AlphaTalk cell-cell interaction result methods for Scstquery."""
 
-    def _get_alphatalk_result_dir(self, dataset_id=None, mapping_method=None):
+    def _get_alphatalk_result_dir(self, dataset_id=None, mapping_method=None, input_source=None):
         if getattr(self, '_is_demo', False):
             return os.path.join(self.path, 'result/alphatalk', 'cci_result.pkl')
         if dataset_id:
             try:
                 ds = Dataset.objects.get(dataset_id=dataset_id)
+                if input_source == 'st':
+                    if ds.precomputed_alphatalk_path:
+                        st_path = os.path.join(ds.precomputed_alphatalk_path, 'cci_result.pkl')
+                        return st_path if os.path.exists(st_path) else None
+                    return None
                 uuid = ds.title
                 base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_alphatalk', 'result')
                 if mapping_method:
@@ -64,9 +69,9 @@ class AlphaTalkMixin:
                             min_lr_score=None, max_lr_score=None,
                             min_p_value=None, max_p_value=None,
                             sortBy=None, order=None, get_metadata=None,
-                            dataset=None, mapping_method=None):
+                            dataset=None, mapping_method=None, input_source=None):
         
-        pkl_path = self._get_alphatalk_result_dir(dataset, mapping_method)
+        pkl_path = self._get_alphatalk_result_dir(dataset, mapping_method, input_source)
 
         try:
             if not os.path.exists(pkl_path):

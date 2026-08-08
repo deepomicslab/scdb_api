@@ -40,10 +40,15 @@ def _load_spider_adata(file_path):
 class SpiderMixin:
     """SPIDER spatial interaction result methods for Scstquery."""
 
-    def _find_spider_h5ad(self, dataset_id, mapping_method=None):
+    def _find_spider_h5ad(self, dataset_id, mapping_method=None, input_source=None):
         if dataset_id:
             try:
                 ds = Dataset.objects.get(dataset_id=dataset_id)
+                if input_source == 'st':
+                    if ds.precomputed_spider_path:
+                        st_path = os.path.join(ds.precomputed_spider_path, 'adata_spider.h5ad')
+                        return st_path if os.path.exists(st_path) else None
+                    return None
                 uuid = ds.title
                 base = os.path.join(self.path, f'dataset_{uuid}', 'subtask_spider', 'result')
                 if mapping_method:
@@ -161,14 +166,14 @@ class SpiderMixin:
             traceback.print_exc()
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderInit(self, dataset=None, mapping_method=None):
+    def getSpiderInit(self, dataset=None, mapping_method=None, input_source=None):
         """Lightweight metadata: pattern list + top-10 LRs per pattern + calibration values (no coordinates).
 
         Coordinates are served separately by getSpiderCoords - the frontend shows
         the menu instantly on opening the panel while the coordinates are fetched
         in parallel in the background, avoiding a 2MB JSON blocking the first screen.
         """
-        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method, input_source)
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
         try:
@@ -195,13 +200,13 @@ class SpiderMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getSpiderCoords(self, dataset=None, mapping_method=None):
+    def getSpiderCoords(self, dataset=None, mapping_method=None, input_source=None):
         """Full coordinate base (12379 points {id, x, y}, x/y already premultiplied by scalef) + calibration values.
 
         The frontend fetches and caches this once before selecting a pattern;
         subsequent pattern/lr requests only send values.
         """
-        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method, input_source)
         if not os.path.exists(h5ad_path):
             return {'data': {}, 'status': 'error', 'message': f'File not found: {h5ad_path}'}
         try:
@@ -225,8 +230,8 @@ class SpiderMixin:
         except Exception as e:
             return {'data': {}, 'status': 'error', 'message': str(e)}
 
-    def getSpiderPatternData(self, dataset=None, pattern_id=None, mapping_method=None):
-        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
+    def getSpiderPatternData(self, dataset=None, pattern_id=None, mapping_method=None, input_source=None):
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method, input_source)
         try:
             if pattern_id is None:
                 raise ValueError("Pattern ID is required")
@@ -241,8 +246,8 @@ class SpiderMixin:
         except Exception as e:
             return {'data': [], 'status': 'error', 'message': str(e)}
 
-    def getSpiderLRData(self, dataset=None, lr_name=None, mapping_method=None):
-        h5ad_path = self._find_spider_h5ad(dataset, mapping_method)
+    def getSpiderLRData(self, dataset=None, lr_name=None, mapping_method=None, input_source=None):
+        h5ad_path = self._find_spider_h5ad(dataset, mapping_method, input_source)
         try:
             if not lr_name:
                 raise ValueError("LR Name is required")

@@ -66,6 +66,15 @@ class Dataset(models.Model):
     collection_url = models.CharField(max_length=500, blank=True, default='')
     explorer_url = models.CharField(max_length=500, blank=True, default='')
 
+    # Precomputed Original ST analysis result directories (per tool; non-empty
+    # means that tool has been precomputed on the raw ST h5ad). Populated by the
+    # precache_st_results management command and read by the mixin result
+    # locators when the frontend requests input_source='st'.
+    precomputed_commot_path = models.CharField(max_length=500, blank=True, default='')
+    precomputed_cellchat_path = models.CharField(max_length=500, blank=True, default='')
+    precomputed_spider_path = models.CharField(max_length=500, blank=True, default='')
+    precomputed_alphatalk_path = models.CharField(max_length=500, blank=True, default='')
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
