@@ -89,8 +89,8 @@ class SubScstquery(Module):
                 input_h5ad = self._resolve_mapping_output(self.dataset_uuid, mapping_method)
                 outputdir = os.path.join(self.path, 'result', 'sc_st_mapping', mapping_method, '')
             os.makedirs(outputdir, exist_ok=True)
-            signaling_type = params.get('signaling_type', 'Secreted Signaling')
-            dis_thr = str(params.get('dis_thr', 500))
+            signaling_type = params.get('signaling_type', 'All')
+            dis_thr = str(params.get('dis_thr', 200))
             min_cell_pct = str(params.get('min_cell_pct', 0.05))
             n_permutations = str(params.get('n_permutations', 100))
             self.script_arguments = [
@@ -108,13 +108,19 @@ class SubScstquery(Module):
             datatype = params.get('datatype', 'st')
             min_cells = params.get('min_cells', 10)
             zero_dist_handle = params.get('zero_dist_handle', 'jitter')
-            cellchat_type = params.get('type', 'truncatedMean')
+            # Independent SC/ST compute methods (frontend sends sc_type/st_type;
+            # the old 'type' key was never sent and silently ignored them).
+            sc_type = params.get('sc_type', 'triMean')
+            st_type = params.get('st_type', 'truncatedMean')
             trim = str(params.get('trim', 0.1))
             interaction_range = str(params.get('interaction_range', 250))
 
             if is_st_source:
                 input_h5ad = st_h5ad_path
                 outputdir = os.path.join(local_settings.ST_PRECOMPUTED_ROOT, dataset_uuid, 'subtask_cellchat', 'result', 'st', '')
+                # Raw ST spots have unique coordinates: no jitter needed, but keep
+                # distance.use=TRUE (requires the 'none' mode in run_cellchat.R).
+                zero_dist_handle = 'none'
             else:
                 mapping_method = self.params.get('mapping_method', 'cytospace')
                 if datatype == 'sc':
@@ -133,8 +139,8 @@ class SubScstquery(Module):
                 datatype,
                 str(min_cells),
                 zero_dist_handle,
-                cellchat_type,
-                cellchat_type,
+                sc_type,
+                st_type,
                 trim,
                 interaction_range,
                 'FALSE',

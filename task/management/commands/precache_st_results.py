@@ -27,21 +27,47 @@ TOOLS = {
         'subtask_type': 'commot',
         'field': 'precomputed_commot_path',
         'products': ('*_LR.h5ad',),
+        'params': {
+            'signaling_type': 'All',
+            'dis_thr': 200,
+            'min_cell_pct': 0.05,
+            'n_permutations': 100,
+        },
     },
     'cellchat': {
         'subtask_type': 'cellchat',
         'field': 'precomputed_cellchat_path',
         'products': ('cellchat_result.rds',),
+        'params': {
+            'groupby': 'cell_type',
+            'db_mode': 'all',
+            'datatype': 'st',
+            'min_cells': 10,
+            'zero_dist_handle': 'none',
+            'sc_type': 'triMean',
+            'st_type': 'truncatedMean',
+            'trim': 0.1,
+            'interaction_range': 250,
+        },
     },
     'spider': {
         'subtask_type': 'spider',
         'field': 'precomputed_spider_path',
         'products': ('adata_spider.h5ad',),
+        'params': {
+            'species': 'human',
+            'datatype': 'st',
+            'groupby': 'cell_type',
+            'p_value': 0.05,
+        },
     },
     'alphatalk': {
         'subtask_type': 'alphatalk',
         'field': 'precomputed_alphatalk_path',
         'products': ('cci_result.pkl',),
+        'params': {
+            'species': 'human',
+        },
     },
 }
 
@@ -144,6 +170,7 @@ class Command(BaseCommand):
                     'projectname': 'precompute_st',
                     'organParts': '',
                 }
+                params.update(cfg['params'])
                 try:
                     module = SubScstquery(cfg['subtask_type'], 'precompute_st',
                                           ds.title, '', ds.file_path, params)
