@@ -172,7 +172,7 @@ class SubScstquery(Module):
                 cluster_key,
                 str(p_value)
             ]
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_spider.sh'
+            self.shell_script = local_settings.SPIDER_SCRIPT
         elif subtask_type == "alphatalk":
             species = params.get('species', 'human').capitalize()
             if is_st_source:

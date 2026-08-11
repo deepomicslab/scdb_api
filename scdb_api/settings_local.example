@@ -10,6 +10,7 @@ SCQUERY_SCRIPT = '/home/platform/project/scdb_platform/scdb_api/workspace/module
 CYTOSPACE_SCRIPT = '/data3/platform/sc_db/1218test/cytospace/run_slurm_cytospace.sh'
 TANGRAM_SCRIPT = '/data3/platform/sc_db/tangram/run_slurm_tangram.sh'
 ALPHATALK_SCRIPT = '/data3/platform/sc_db/AlphaTalk/run_slurm_alphatalk.sh'
+SPIDER_SCRIPT = '/data3/platform/sc_db/spider/run_slurm_spider.sh'
 LR_COMPARISON_POSTPROCESS_SCRIPT = '/data3/platform/sc_db/cellchat/run_lr_comparison_postprocess.sh'
 
 # Root directory for precomputed Original ST analysis results (commot/cellchat/
