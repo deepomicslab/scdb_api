@@ -264,6 +264,24 @@ class SubScstquery(Module):
                 self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir, cs_mcn, cs_dm]
             else:
                 self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
+        elif subtask_type == 'scgpt_embedding':
+            # scGPT zero-shot cell embedding -> UMAP + heatmap PNGs (CPU inference).
+            # umap_embedding / heatmap_embedding viewers share this computation.
+            outputdir = self.path + '/result/'
+            os.makedirs(outputdir, exist_ok=True)
+            clusters_csv = os.path.join(user_main_dir, 'result/sc_marker',
+                                        f'{projectname}_hierarchical_clusters.csv')
+            if not os.path.exists(clusters_csv):
+                clusters_csv = os.path.join(user_main_dir, 'result/sc_marker',
+                                            f'{projectname}_clusters.csv')
+            n_neighbors = str(params.get('n_neighbors', 15))
+            min_dist = str(params.get('min_dist', 0.5))
+            self.script_arguments = [inputfilepath, outputdir, clusters_csv, n_neighbors, min_dist]
+            self.shell_script = local_settings.SCGPT_EMBEDDING_SCRIPT
+        elif subtask_type in ('umap_embedding', 'heatmap_embedding'):
+            # viewer-only; actual work delegated to scgpt_embedding (see PREREQUISITE_CHAIN)
+            self.script_arguments = []
+            self.shell_script = None
         else:
             raise ValueError(f"Unsupported subtask type: {subtask_type}")
 
@@ -378,6 +396,15 @@ class SubScstquery(Module):
             if self.dependencies:
                 self.status = TaskStatus.PENDING
                 self.job_id = 'pending_he_scatter'
+                return self.job_id
+            self.status = TaskStatus.COMPLETED
+            self.job_id = 'viewer_only'
+            return self.job_id
+        if self.subtask_type in ('umap_embedding', 'heatmap_embedding'):
+            # viewer-only; actual work delegated to scgpt_embedding
+            if self.dependencies:
+                self.status = TaskStatus.PENDING
+                self.job_id = 'pending_scgpt'
                 return self.job_id
             self.status = TaskStatus.COMPLETED
             self.job_id = 'viewer_only'

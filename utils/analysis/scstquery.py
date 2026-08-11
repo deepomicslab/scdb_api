@@ -8,12 +8,14 @@ from .scstquery_mixins import (
     CellChatMixin,
     SpiderMixin,
     AlphaTalkMixin,
+    ScgptMixin,
     DispatchMixin,
 )
 
 
 class Scstquery(Module, CommonMixin, HEScatterMixin, HierarchicalClusteringMixin,
-                CommotMixin, CellChatMixin, SpiderMixin, AlphaTalkMixin, DispatchMixin):
+                CommotMixin, CellChatMixin, SpiderMixin, AlphaTalkMixin,
+                ScgptMixin, DispatchMixin):
     def __init__(self, name, path, params):
         super().__init__(name, path)
         inputfilepath = local_settings.USERTASKPATH + path + '/upload/input.h5ad'

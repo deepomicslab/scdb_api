@@ -19,6 +19,7 @@ SLURM_ACTIVE_STATES = frozenset({
 # Special pseudo job_id values (not real SLURM job IDs)
 PSEUDO_JOB_IDS = frozenset({
     'viewer_only', 'skipped_existing', 'pending_hc', 'pending_he_scatter',
+    'pending_scgpt',
 })
 
 

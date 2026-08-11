@@ -30,6 +30,8 @@ _RESULT_DISPATCH = {
     'spider_pattern': ('getSpiderPatternData', ['dataset', 'pattern_id', 'mapping_method', 'input_source'], {}, False),
     'spider_lr': ('getSpiderLRData', ['dataset', 'lr_name', 'mapping_method', 'input_source'], {}, False),
     'lr_spearman': ('getLRSpearmanData', ['dataset', 'mapping_method'], {}, False),
+    'scgpt_umap': ('getScgptUmap', ['dataset'], {}, False),
+    'scgpt_heatmap': ('getScgptHeatmap', ['dataset'], {}, False),
     'scstmappingStatus': ('_scstmappingStatusFallback', ['dataset'], {}, False),
     'AlphaTalk': ('getAlphaTalkLRPairs', [], {
         'page': 1, 'pageSize': 15, 'sender': None, 'receiver': None,

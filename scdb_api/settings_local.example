@@ -11,6 +11,10 @@ CYTOSPACE_SCRIPT = '/data3/platform/sc_db/1218test/cytospace/run_slurm_cytospace
 TANGRAM_SCRIPT = '/data3/platform/sc_db/tangram/run_slurm_tangram.sh'
 ALPHATALK_SCRIPT = '/data3/platform/sc_db/AlphaTalk/run_slurm_alphatalk.sh'
 SPIDER_SCRIPT = '/data3/platform/sc_db/spider/run_slurm_spider.sh'
+SCGPT_EMBEDDING_SCRIPT = '/data3/platform/sc_db/scgpt/run_slurm_scgpt_embedding.sh'
+# scGPT zero-shot model directory (save/scGPT_human = official human pretrained;
+# swap to a fine-tuned save dir when available without changing any contract).
+SCGPT_MODEL_DIR = '/data3/platform/sc_db/scgpt/save/scGPT_human'
 LR_COMPARISON_POSTPROCESS_SCRIPT = '/data3/platform/sc_db/cellchat/run_lr_comparison_postprocess.sh'
 
 # Root directory for precomputed Original ST analysis results (commot/cellchat/
@@ -30,4 +34,5 @@ SLURM_LOG_PATHS = {
     ('hierarchical_clustering', None): '/home/platform/project/scdb_platform/scdb_api/workspace/task_log/hc_{job_id}.out',
     ('alphatalk', None):           '/data3/platform/sc_db/AlphaTalk/logs/alphatalk_{job_id}.out',
     ('lr_comparison', None):       '/data3/platform/sc_db/cellchat/logs/lr_comparison_{job_id}.out',
+    ('scgpt_embedding', None):     '/data3/platform/sc_db/scgpt/logs/scgpt_embedding_{job_id}.out',
 }

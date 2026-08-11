@@ -36,7 +36,21 @@ PREREQUISITE_CHAIN = {
         'subtask_id_key': '_hs_subtask_id',
         'job_id_key': '_hs_job_id',
     },
+    'umap_embedding': {
+        'prereq_type': 'scgpt_embedding',
+        'subtask_id_key': '_scgpt_subtask_id',
+        'job_id_key': '_scgpt_job_id',
+    },
+    'heatmap_embedding': {
+        'prereq_type': 'scgpt_embedding',
+        'subtask_id_key': '_scgpt_subtask_id',
+        'job_id_key': '_scgpt_job_id',
+    },
 }
+
+# Statuses for which an existing prerequisite subtask can be reused instead of
+# re-submitting a duplicate SLURM job (UMAP/Heatmap share one scgpt_embedding).
+PREREQ_REUSE_STATUSES = ('COMPLETED', 'RUNNING', 'PENDING', 'CREATED')
 
 # Subtask types that require a completed SC-ST Mapping before they can run
 MAPPING_DEPENDENT_TYPES = ('commot', 'cellchat', 'spider', 'alphatalk', 'lr_comparison')
@@ -47,6 +61,18 @@ def get_module_class(module_name):
     Returns None if not found.
     """
     return MODULE_REGISTRY.get(module_name)
+
+
+class ExistingJobModule(utils.analysis.base.Module):
+    """Minimal Module wrapper carrying an already-submitted SLURM job_id.
+
+    Used when a prerequisite (e.g. scgpt_embedding) already exists for the same
+    main task + dataset: the viewer depends on it without re-submitting a job.
+    """
+
+    def __init__(self, job_id):
+        super().__init__(name='existing_prereq', userpath='')
+        self.job_id = job_id
 
 
 def _chain_prerequisite(cls, prereq_type, usertask_dir, dataset_uuid,
@@ -137,18 +163,34 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     new_submodule = cls(subtasktype, usertask_dir, dataset_uuid,
                         dataset_path or '', st_h5ad_path, parameters_dict)
 
-    # Auto-chain prerequisites (HC for recall_analysis, HE for annotation_mapping)
+    # Auto-chain prerequisites (HC for recall_analysis, HE for annotation_mapping,
+    # scgpt_embedding for umap/heatmap viewers)
     chain_config = PREREQUISITE_CHAIN.get(subtasktype)
     if chain_config:
-        result = _chain_prerequisite(
-            cls, chain_config['prereq_type'], usertask_dir, dataset_uuid,
-            dataset_path or '', st_h5ad_path, parameters_dict, main_task, dataset_id
-        )
-        if result[0]:  # prereq_module
-            prereq_module, prereq_job_id, prereq_subtask = result
-            new_submodule.add_dependency(prereq_module)
-            parameters_dict[chain_config['subtask_id_key']] = prereq_subtask.id
-            parameters_dict[chain_config['job_id_key']] = prereq_job_id
+        # Reuse an existing prerequisite for the same task + dataset (UMAP and
+        # Heatmap share one scgpt_embedding compute job instead of running twice).
+        existing_prereq = SubTask.objects.filter(
+            main_task=main_task,
+            subtask_type=chain_config['prereq_type'],
+            dataset_path=dataset_id,
+        ).order_by('-id').first()
+        reuse = (existing_prereq is not None
+                 and (existing_prereq.status or '').upper() in PREREQ_REUSE_STATUSES)
+        if reuse:
+            parameters_dict[chain_config['subtask_id_key']] = existing_prereq.id
+            parameters_dict[chain_config['job_id_key']] = existing_prereq.job_id
+            if (existing_prereq.status or '').upper() != 'COMPLETED':
+                new_submodule.add_dependency(ExistingJobModule(existing_prereq.job_id))
+        else:
+            result = _chain_prerequisite(
+                cls, chain_config['prereq_type'], usertask_dir, dataset_uuid,
+                dataset_path or '', st_h5ad_path, parameters_dict, main_task, dataset_id
+            )
+            if result[0]:  # prereq_module
+                prereq_module, prereq_job_id, prereq_subtask = result
+                new_submodule.add_dependency(prereq_module)
+                parameters_dict[chain_config['subtask_id_key']] = prereq_subtask.id
+                parameters_dict[chain_config['job_id_key']] = prereq_job_id
 
     # Explicit mapping dependency check for commot/cellchat/spider
     if subtasktype in MAPPING_DEPENDENT_TYPES:

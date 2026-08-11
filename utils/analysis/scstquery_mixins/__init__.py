@@ -5,6 +5,7 @@ from .commot import CommotMixin
 from .cellchat import CellChatMixin
 from .spider import SpiderMixin
 from .alphatalk import AlphaTalkMixin
+from .scgpt import ScgptMixin
 from .dispatch import DispatchMixin
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     'CellChatMixin',
     'SpiderMixin',
     'AlphaTalkMixin',
+    'ScgptMixin',
     'DispatchMixin',
 ]

@@ -226,6 +226,10 @@ def taskresultview(request):
                             as_attachment=True,
                             filename=res.get('filename', 'mapping.h5ad'),
                             content_type='application/octet-stream')
+    # scgpt image results return {'_image_file': path} -> inline image response
+    # (attachment download would break direct <img> display).
+    if isinstance(res, dict) and res.get('_image_file'):
+        return _img_file_response(res['_image_file'], 'image/png')
     return Response(res)
 
 
@@ -517,6 +521,34 @@ def subtask_status_update(request):
             'job_id': job_id,
             'hs_job_id': hs_job,
             'message': f'Waiting for HE scatter subtask (job {hs_job}) to complete.'
+        })
+
+    # 2d. Pending viewer waiting for scgpt_embedding subtask to complete
+    # (UMAP/Heatmap embeddings share one scgpt_embedding compute job)
+    if job_id == 'pending_scgpt' and subtask.subtask_type in ('umap_embedding', 'heatmap_embedding'):
+        scgpt_subtask = SubTask.objects.filter(
+            main_task=subtask.main_task,
+            subtask_type='scgpt_embedding',
+            dataset_path=subtask.dataset_path
+        ).order_by('-id').first()
+        _sync_dependency_from_slurm(scgpt_subtask)
+        if scgpt_subtask and (scgpt_subtask.status or '').upper() == 'COMPLETED':
+            subtask.status = TaskStatus.COMPLETED
+            subtask.job_id = 'viewer_only'
+            subtask.save()
+            return Response({
+                'status': 'Success',
+                'current_status': TaskStatus.COMPLETED,
+                'job_id': 'viewer_only',
+                'message': 'scGPT embedding completed, viewer ready.'
+            })
+        scgpt_job = (subtask.parameters or {}).get('_scgpt_job_id', 'unknown')
+        return Response({
+            'status': 'Success',
+            'current_status': 'Pending',
+            'job_id': job_id,
+            'scgpt_job_id': scgpt_job,
+            'message': f'Waiting for scGPT embedding subtask (job {scgpt_job}) to complete.'
         })
 
     # 3. job_id is empty but status is non-terminal
