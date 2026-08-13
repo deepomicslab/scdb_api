@@ -175,6 +175,7 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
             dataset_path=dataset_id,
         ).order_by('-id').first()
         reuse = (existing_prereq is not None
+                 and not parameters_dict.get('force_rerun')
                  and (existing_prereq.status or '').upper() in PREREQ_REUSE_STATUSES)
         if reuse:
             parameters_dict[chain_config['subtask_id_key']] = existing_prereq.id

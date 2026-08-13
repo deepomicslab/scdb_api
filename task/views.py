@@ -227,9 +227,13 @@ def taskresultview(request):
                             filename=res.get('filename', 'mapping.h5ad'),
                             content_type='application/octet-stream')
     # scgpt image results return {'_image_file': path} -> inline image response
-    # (attachment download would break direct <img> display).
+    # (attachment download would break direct <img> display). No-cache: re-runs
+    # regenerate these PNGs under the same URL, so browsers must revalidate.
     if isinstance(res, dict) and res.get('_image_file'):
-        return _img_file_response(res['_image_file'], 'image/png')
+        return _img_file_response(
+            res['_image_file'], 'image/png',
+            cache_headers={'Cache-Control': 'no-cache'},
+        )
     return Response(res)
 
 
@@ -240,14 +244,19 @@ def taskresultview(request):
 _IMG_CACHE_HEADERS = {'Cache-Control': 'public, max-age=86400'}
 
 
-def _img_file_response(path, content_type):
+def _img_file_response(path, content_type, cache_headers=_IMG_CACHE_HEADERS):
     """Image FileResponse: explicit Content-Encoding: identity makes GZipMiddleware skip it.
 
     JPEG is already compressed; streaming gzip wastes CPU without reducing size. The
     identity header is Django's official mechanism for making GZipMiddleware skip a
     response (responses that already have Content-Encoding are not compressed again).
+
+    cache_headers defaults to the long-lived dataset-image cache (stable per
+    dataset_id/resolution). Analysis-result images (scgpt UMAP/heatmap, re-generated
+    on every re-run) must pass a no-cache header instead so <img> revalidation
+    always picks up the fresh PNG.
     """
-    resp = FileResponse(open(path, 'rb'), content_type=content_type, headers=_IMG_CACHE_HEADERS)
+    resp = FileResponse(open(path, 'rb'), content_type=content_type, headers=cache_headers)
     resp['Content-Encoding'] = 'identity'
     return resp
 
