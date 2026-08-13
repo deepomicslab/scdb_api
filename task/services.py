@@ -177,6 +177,18 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
         reuse = (existing_prereq is not None
                  and not parameters_dict.get('force_rerun')
                  and (existing_prereq.status or '').upper() in PREREQ_REUSE_STATUSES)
+        # Guard against parallel scgpt_embedding jobs: a force_rerun (or first
+        # submission racing an active one) must not submit while another
+        # embedding is still running for the same task + dataset. The frontend
+        # disables the Run buttons, this is the server-side backstop.
+        if (not reuse and subtasktype in ('umap_embedding', 'heatmap_embedding')
+                and existing_prereq is not None
+                and (existing_prereq.status or '').upper() in ('CREATED', 'PENDING', 'RUNNING')):
+            new_subtask.status = TaskStatus.FAILED
+            new_subtask.save()
+            raise ValueError(
+                'scGPT embedding is still running, please wait for it to complete'
+            )
         if reuse:
             parameters_dict[chain_config['subtask_id_key']] = existing_prereq.id
             parameters_dict[chain_config['job_id_key']] = existing_prereq.job_id
