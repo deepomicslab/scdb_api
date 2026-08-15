@@ -32,6 +32,10 @@ class tasks(models.Model):
     modulelist = models.CharField(max_length=400, blank=True, null=True)
     status = models.CharField(max_length=60, blank=True, null=True)
     task_detail = models.TextField(blank=True, null=True)
+    # First scheduled sync at which SLURM could not resolve this task's job.
+    # Cleared as soon as SLURM reports any state. If it stays set for
+    # SLURM_MISSING_TIMEOUT, scheduled.py marks the task Failed.
+    slurm_missing_since = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

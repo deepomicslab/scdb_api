@@ -3,6 +3,7 @@ from django.core.management.base import BaseCommand, CommandError
 from task.models import tasks, TaskStatus
 from utils.slurm_api import normalize_slurm_status, get_job_status as slurm_get_job_status
 import datetime, pickle, json, os
+from django.utils import timezone
 from scdb_api import settings_local as local_settings
 
 # Raw SLURM terminal statuses (checked before normalization)
@@ -10,6 +11,12 @@ SLURM_TERMINAL_STATUSES = frozenset({
     'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT',
     'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL', 'OUT_OF_MEMORY',
 })
+
+# How long a Running task may stay invisible to squeue/sacct before it is
+# considered stale and marked Failed. This covers cases where the web service
+# was interrupted and the SLURM record was also lost; transient SLURM outages
+# shorter than this window keep the task Running and retry on the next sync.
+SLURM_MISSING_TIMEOUT = datetime.timedelta(hours=1)
 
 
 class Command(BaseCommand):
@@ -50,6 +57,44 @@ class Command(BaseCommand):
 
                 raw_status = slurm_get_job_status(job_id)
                 current_slurm_status = normalize_slurm_status(raw_status)
+
+                if current_slurm_status:
+                    # SLURM resolved the job again (active or terminal):
+                    # clear the missing-since timer if it was set.
+                    if task.slurm_missing_since is not None:
+                        task.slurm_missing_since = None
+                        task.save(update_fields=['slurm_missing_since'])
+                else:
+                    # squeue + sacct both failed to resolve the job. Keep the
+                    # task Running for a grace period (transient SLURM outage),
+                    # then mark it Failed if the job remains invisible.
+                    now = timezone.now()
+                    if task.slurm_missing_since is None:
+                        task.slurm_missing_since = now
+                        task.save(update_fields=['slurm_missing_since'])
+                    elif now - task.slurm_missing_since >= SLURM_MISSING_TIMEOUT:
+                        task.status = TaskStatus.FAILED
+                        task.slurm_missing_since = None
+                        task.save(update_fields=['status', 'slurm_missing_since'])
+
+                        if os.path.exists(jsonpath):
+                            try:
+                                with open(jsonpath, 'r') as f:
+                                    jsondata = json.load(f)
+                                if isinstance(jsondata, list) and len(jsondata) > 0:
+                                    jsondata[0]['status'] = task.status
+                                    with open(jsonpath, 'w') as f:
+                                        json.dump(jsondata, f, ensure_ascii=False, indent=4)
+                            except Exception:
+                                pass
+
+                        self.stdout.write(self.style.WARNING(
+                            f'Task {task.id} marked Failed: SLURM job {job_id} not found for {SLURM_MISSING_TIMEOUT}'
+                        ))
+                        self._append_change_log(
+                            f'Task {task.id} updated to {task.status} (SLURM job missing)'
+                        )
+                        continue
 
                 if current_slurm_status and current_slurm_status.upper() in SLURM_TERMINAL_STATUSES:
                     task.status = current_slurm_status or TaskStatus.ERROR
