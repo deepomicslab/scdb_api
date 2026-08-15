@@ -23,9 +23,10 @@ class Scstquery(Module, CommonMixin, HEScatterMixin, HierarchicalClusteringMixin
         paramk = str(params['k'])
         projectname = params['projectname']
         organs = params['organParts']
-        disease = params['disease']
+        disease = str(params.get('disease', 'all')).lower()
+        disease_filter = '' if disease == 'all' else disease
         if params['processType'] == "cluster":
-            self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'cluster', organs]
+            self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'cluster', organs, disease_filter]
         elif params['processType'] == "celltype":
-            self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'cell_type', organs, disease]
+            self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'cell_type', organs, disease_filter]
         self.shell_script = local_settings.SCDB_MODULE + 'scst_query/run.sh'

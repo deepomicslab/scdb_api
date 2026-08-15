@@ -69,14 +69,14 @@ class Command(BaseCommand):
             except Exception as e:
                 error_msg = f'Error processing task {task.id}: {str(e)}'
                 self.stdout.write(self.style.ERROR(error_msg))
-        try:
-            if (task.status or '').lower() == 'running':
-                task.status = TaskStatus.FAILED
-                task.save()
-                self.stdout.write(self.style.WARNING(f'Task {task.id} marked Failed due to processing error'))
-                self._append_change_log(f'Task {task.id} updated to {task.status}')
-        except Exception:
-            pass
+                try:
+                    if (task.status or '').lower() == 'running':
+                        task.status = TaskStatus.FAILED
+                        task.save()
+                        self.stdout.write(self.style.WARNING(f'Task {task.id} marked Failed due to processing error'))
+                        self._append_change_log(f'Task {task.id} updated to {task.status}')
+                except Exception:
+                    pass
 
     def _append_change_log(self, msg):
         """Write a line only for real changes (not on empty runs), so update.txt stops growing."""
