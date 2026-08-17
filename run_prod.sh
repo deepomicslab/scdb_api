@@ -25,9 +25,17 @@ export PATH="$ENV_PREFIX/bin:/usr/local/bin:/usr/bin:/bin"
 unset PYTHONHOME
 unset PYTHONPATH
 unset VIRTUAL_ENV
-unset CONDA_PREFIX
 unset CONDA_DEFAULT_ENV
 unset CONDA_PROMPT_MODIFIER
+unset CONDA_SHLVL
+unset CONDA_PREFIX_1 CONDA_PREFIX_2 CONDA_PREFIX_3 CONDA_PREFIX_4
+unset CONDA_STACK_ENV
+unset PYTHON_SESSION_INITIALIZED
+# Drop the current shell's conda prefix while keeping the conda root pointers
+# (CONDA_EXE/CONDA_ROOT) so child processes that touch conda don't crash with an
+# inconsistent "CONDA_SHLVL != 0 but CONDA_PREFIX unset" stack.
+unset CONDA_PREFIX
+export CONDA_SHLVL=0
 export PYTHONNOUSERSITE=1
 
 # Use the absolute gunicorn binary (not `python -m gunicorn`): its shebang already

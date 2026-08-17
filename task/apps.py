@@ -11,11 +11,49 @@ r_proxy = None
 
 # ================= Config section =================
 CONDA_PYTHON = '/data3/platform/sc_db/cellchat/env/bin/python'
+CONDA_PREFIX = '/data3/platform/sc_db/cellchat/env'
 WORKER_SCRIPT = os.path.join(os.path.dirname(__file__), 'r_worker.py')
 SOCKET_PATH = '/tmp/cellchat_r.sock'
 AUTH_KEY = os.environ.get('R_AUTH_KEY', 'cellchat_secret_key').encode()
 
 _proxy_lock = threading.Lock()
+
+
+def _r_worker_env():
+    """Build a clean, self-contained environment for the R worker subprocess.
+
+    The R worker runs with the cellchat conda env's python, so it must not inherit
+    leftover CONDA_* state from whatever shell started Gunicorn (e.g. an inconsistent
+    CONDA_SHLVL/CONDA_PREFIX_* stack can make conda's activate() crash with
+    TypeError inside rpy2 startup). Pin the full stack to the cellchat env and keep
+    only the essential variables.
+    """
+    env = {}
+    for k in ('HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'PATH'):
+        if k in os.environ:
+            env[k] = os.environ[k]
+    # Base system PATH first, cellchat bin appended by cellchat_r_service at import
+    env['PATH'] = env.get('PATH', '/usr/local/bin:/usr/bin:/bin')
+    env['CONDA_PREFIX'] = CONDA_PREFIX
+    env['CONDA_DEFAULT_ENV'] = 'cellchat'
+    env['CONDA_SHLVL'] = '1'
+    env['CONDA_EXE'] = os.environ.get('CONDA_EXE', '/data3/platform/sc_db/miniconda3/bin/conda')
+    env['CONDA_ROOT'] = os.environ.get('CONDA_ROOT', '/data3/platform/sc_db/miniconda3')
+    env['CONDA_PYTHON_EXE'] = os.environ.get(
+        'CONDA_PYTHON_EXE', '/data3/platform/sc_db/miniconda3/bin/python'
+    )
+    env['CONDA_PROMPT_MODIFIER'] = '(cellchat)'
+    env['PYTHONNOUSERSITE'] = '1'
+    env['PYTHONUNBUFFERED'] = '1'
+    # cellchat env's R runtime
+    env['R_HOME'] = os.path.join(CONDA_PREFIX, 'lib', 'R')
+    env['LD_LIBRARY_PATH'] = (
+        os.path.join(CONDA_PREFIX, 'lib', 'R', 'lib') + ':' + env.get('LD_LIBRARY_PATH', '')
+    )
+    env['R_AUTH_KEY'] = AUTH_KEY.decode('utf-8')
+    # The worker must see the Django project on sys.path (it imports task.cellchat_r_service)
+    env['PYTHONPATH'] = os.getcwd()
+    return env
 
 
 class RServiceManager(BaseManager):
@@ -68,6 +106,7 @@ class TaskConfig(AppConfig):
             subprocess.Popen(
                 [CONDA_PYTHON, WORKER_SCRIPT, SOCKET_PATH, AUTH_KEY.decode('utf-8')],
                 cwd=os.getcwd(),
+                env=_r_worker_env(),
                 # stdout=sys.stdout, # show subprocess output in the main terminal for debugging
                 # stderr=sys.stderr
             )
