@@ -30,7 +30,11 @@ unset CONDA_DEFAULT_ENV
 unset CONDA_PROMPT_MODIFIER
 export PYTHONNOUSERSITE=1
 
-exec "$ENV_PREFIX/bin/python" -m gunicorn scdb_api.wsgi:application \
+# Use the absolute gunicorn binary (not `python -m gunicorn`): its shebang already
+# points at the pinned scdb python, and it keeps sys.argv[0] basename == "gunicorn",
+# which task/apps.py and core/apps.py rely on to detect the web server and start the
+# R worker / scheduler threads.
+exec "$ENV_PREFIX/bin/gunicorn" scdb_api.wsgi:application \
   --workers 4 \
   --bind 127.0.0.1:8899 \
   --preload \
