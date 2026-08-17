@@ -45,9 +45,11 @@ export PYTHONUNBUFFERED=1
 # which task/apps.py and core/apps.py rely on to detect the web server and start the
 # R worker / scheduler threads.
 #
-# stdout/stderr are teed to both the terminal and logs/app.log / logs/app-error.log
-# so Django/R worker print() stays visible in the console while also landing on disk.
-# access/error logs remain gunicorn-only files (access.log / error.log).
+# stdout is teed to both the terminal and logs/app.log so Django/R worker print()
+# stays visible while also landing on disk.
+# stderr (gunicorn's startup/worker/signal logs via --error-logfile - plus any app
+# stderr) is teed to the terminal and appended to BOTH logs/error.log and
+# logs/app-error.log, so the gunicorn log remains a single file for tailing.
 exec "$ENV_PREFIX/bin/gunicorn" scdb_api.wsgi:application \
   --workers 4 \
   --bind 127.0.0.1:8899 \
@@ -56,6 +58,6 @@ exec "$ENV_PREFIX/bin/gunicorn" scdb_api.wsgi:application \
   --max-requests 5000 \
   --max-requests-jitter 1000 \
   --access-logfile logs/access.log \
-  --error-logfile logs/error.log \
+  --error-logfile - \
   > >(tee -a logs/app.log) \
-  2> >(tee -a logs/app-error.log >&2)
+  2> >(tee -a logs/error.log logs/app-error.log >&2)
