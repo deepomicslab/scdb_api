@@ -37,11 +37,17 @@ unset PYTHON_SESSION_INITIALIZED
 unset CONDA_PREFIX
 export CONDA_SHLVL=0
 export PYTHONNOUSERSITE=1
+# Unbuffered stdout/stderr so the tees below flush lines immediately.
+export PYTHONUNBUFFERED=1
 
 # Use the absolute gunicorn binary (not `python -m gunicorn`): its shebang already
 # points at the pinned scdb python, and it keeps sys.argv[0] basename == "gunicorn",
 # which task/apps.py and core/apps.py rely on to detect the web server and start the
 # R worker / scheduler threads.
+#
+# stdout/stderr are teed to both the terminal and logs/app.log / logs/app-error.log
+# so Django/R worker print() stays visible in the console while also landing on disk.
+# access/error logs remain gunicorn-only files (access.log / error.log).
 exec "$ENV_PREFIX/bin/gunicorn" scdb_api.wsgi:application \
   --workers 4 \
   --bind 127.0.0.1:8899 \
@@ -50,4 +56,6 @@ exec "$ENV_PREFIX/bin/gunicorn" scdb_api.wsgi:application \
   --max-requests 5000 \
   --max-requests-jitter 1000 \
   --access-logfile logs/access.log \
-  --error-logfile logs/error.log
+  --error-logfile logs/error.log \
+  > >(tee -a logs/app.log) \
+  2> >(tee -a logs/app-error.log >&2)
