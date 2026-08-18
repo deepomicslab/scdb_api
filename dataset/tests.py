@@ -79,8 +79,9 @@ class OrgansAndDatasetsBatchQueryTests(TestCase):
         self.assertIn('DS_C', heart)
 
     def test_constant_number_of_queries(self):
-        # Organs/organsAndDatasets must not issue one query per dataset.
-        # Query budget is small and independent of dataset count: the subtask_map
-        # lookup (tasks by userpath) + the single title__in batch query (+ extras).
-        with self.assertNumQueries(3):
+        # Must NOT issue one query per dataset. Exactly 2 queries regardless of how
+        # many datasets are in result_scores.json:
+        #   1. tasks lookup by userpath (subtask_map)
+        #   2. single title__in batch query for all datasets
+        with self.assertNumQueries(2):
             self.mixin.getOrgansAndDatasets()
