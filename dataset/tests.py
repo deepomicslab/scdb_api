@@ -10,6 +10,7 @@ django.setup()
 from django.test import TestCase
 
 from dataset.models import Dataset
+from utils.analysis.base import extract_dataset_uuid
 from utils.analysis.scstquery_mixins.common import CommonMixin
 
 
@@ -51,6 +52,9 @@ class OrgansAndDatasetsBatchQueryTests(TestCase):
 
         self.mixin = CommonMixin()
         self.mixin.path = self.task_root
+        # _extract_dataset_uuid normally comes from the Module base class; reuse the
+        # same standalone function so the mixin can be tested on its own.
+        self.mixin._extract_dataset_uuid = staticmethod(extract_dataset_uuid)
 
     def tearDown(self):
         import shutil
