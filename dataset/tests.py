@@ -85,3 +85,47 @@ class OrgansAndDatasetsBatchQueryTests(TestCase):
         #   2. single title__in batch query for all datasets
         with self.assertNumQueries(2):
             self.mixin.getOrgansAndDatasets()
+
+
+class HasImageCacheTests(TestCase):
+    """_has_image_cached: hit/miss TTL caching without raising."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from dataset import models as dm
+
+        dm._HAS_IMAGE_CACHE.clear()
+
+    def tearDown(self):
+        from dataset import models as dm
+
+        dm._HAS_IMAGE_CACHE.clear()
+
+    def test_existing_file_cached(self):
+        from unittest import mock
+
+        from dataset import models as dm
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, tmp, ignore_errors=True)
+        target = os.path.join(tmp, 'hires.jpg')
+        open(target, 'w').close()
+
+        self.assertTrue(dm._has_image_cached(target))
+        # cached: even if the file disappears, the hit TTL keeps returning True
+        os.remove(target)
+        self.assertTrue(dm._has_image_cached(target))
+
+    def test_missing_file_cached_as_false(self):
+        from dataset import models as dm
+
+        target = '/nonexistent/definitely/missing/hires.jpg'
+        self.assertFalse(dm._has_image_cached(target))
+        # cached false (no second stat; we just assert it stays consistent)
+        self.assertFalse(dm._has_image_cached(target))

@@ -1,6 +1,7 @@
 # dataset/models.py
 
 import os
+import time
 import anndata as ad
 from django.db import models, transaction
 from django.db.models import Sum, Count
@@ -11,6 +12,28 @@ from utils.logging import get_logger
 logger = get_logger('dataset_models')
 
 CELL_TYPE_COL = 'cell_type'
+
+# has_image() stat cache: hires.jpg presence is a stable fact (changes only on
+# re-import), so once checked it is cached for a long TTL; a miss is cached briefly
+# so the 51 image-less datasets don't stat /data3 on every request (organsanddatasets
+# + dataset detail calls this per dataset per request).
+_HAS_IMAGE_CACHE = {}  # image_dir -> (exists: bool, expire: float)
+_HAS_IMAGE_HIT_TTL = 24 * 3600  # exists: stable for a day
+_HAS_IMAGE_MISS_TTL = 60        # not exists: re-check every minute
+
+
+def _has_image_cached(path):
+    """True/False with TTL caching; never raises."""
+    now = time.time()
+    hit = _HAS_IMAGE_CACHE.get(path)
+    if hit and hit[1] > now:
+        return hit[0]
+    try:
+        exists = os.path.exists(path)
+    except Exception:
+        exists = False
+    _HAS_IMAGE_CACHE[path] = (exists, now + (_HAS_IMAGE_HIT_TTL if exists else _HAS_IMAGE_MISS_TTL))
+    return exists
 
 # Module-level flag to skip per-row signal during bulk imports
 _BULK_IMPORT = False
@@ -135,7 +158,7 @@ class Dataset(models.Model):
             return False
         from django.conf import settings
         image_dir = self.image_dir or f'st/{self.dataset_id}'
-        return os.path.exists(os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg'))
+        return _has_image_cached(os.path.join(settings.MEDIA_ROOT, image_dir, 'hires.jpg'))
 
     def _extract_images(self):
         """Extract the 3 JPEG tiers from h5ad into MEDIA_ROOT/{image_dir}/.
