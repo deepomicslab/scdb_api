@@ -284,10 +284,12 @@ class CreateTaskAtomicityTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json().get('status'), 'Failed')
-        # no task row survives
-        self.assertEqual(task_model.objects.filter(user='u').count(), 0)
+        # the task row is intentionally kept as Failed (visible in workspace)
+        kept = task_model.objects.filter(user='u').first()
+        self.assertIsNotNone(kept)
+        self.assertEqual((kept.status or '').lower(), 'failed')
         # no job was submitted so nothing to cancel
         self.assertEqual(cancelled, [])
-        # the created task directory was cleaned up (only the fixture file remains)
+        # the task directory is kept on disk for later inspection
         leftovers = [p for p in os.listdir(tmp_workspace) if p != 'blank']
-        self.assertEqual(leftovers, [])
+        self.assertEqual(len(leftovers), 1)
