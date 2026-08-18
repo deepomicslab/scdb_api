@@ -105,3 +105,39 @@ class DownloadSecurityTests(TestCase):
         # a bare unknown name must fail with a message, never raise UnboundLocalError
         res = self._download('random_file_without_extension')
         self.assertEqual(res.get('status'), 'fail')
+
+
+class UploadValidationTests(TestCase):
+    """createtask upload guards: HDF5 magic-byte detection."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+        from task import views
+
+        cls._is_h5ad_content = staticmethod(views._is_h5ad_content)
+
+    def _write_bytes(self, data):
+        import io
+
+        f = io.BytesIO(data)
+        return f
+
+    def test_valid_hdf5_magic_accepted(self):
+        f = self._write_bytes(b'\x89HDF\r\n\x1a\n' + b'rest-of-file')
+        self.assertTrue(self._is_h5ad_content(f))
+
+    def test_plain_text_rejected(self):
+        f = self._write_bytes(b'this is just text, not h5ad')
+        self.assertFalse(self._is_h5ad_content(f))
+
+    def test_empty_file_rejected(self):
+        f = self._write_bytes(b'')
+        self.assertFalse(self._is_h5ad_content(f))
+
+    def test_short_header_rejected(self):
+        f = self._write_bytes(b'\x89HDF\r\n\x1a')  # 7 bytes, one short
+        self.assertFalse(self._is_h5ad_content(f))

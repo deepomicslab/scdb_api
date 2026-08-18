@@ -20,6 +20,28 @@ from utils.mapping_paths import check_mapping_completed
 import pickle
 from utils.spatial_calibration import IMAGE_RES_SPECS
 
+# Maximum accepted h5ad upload size (bytes). Checked incrementally while streaming
+# chunks to disk, so oversized uploads are aborted before they can fill /data3.
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+
+# HDF5 magic bytes: h5ad files are HDF5 containers and must start with this signature.
+HDF5_MAGIC = b'\x89HDF\r\n\x1a\n'
+
+
+def _is_h5ad_content(file_obj):
+    """Cheap validation that the uploaded stream begins with the HDF5 signature.
+
+    Reads the first 8 bytes of a freshly-written file; rewinds is not needed since
+    the file is only read once after writing completes.
+    """
+    try:
+        file_obj.seek(0)
+        head = file_obj.read(len(HDF5_MAGIC))
+        return head == HDF5_MAGIC
+    except Exception:
+        return False
+
+
 
 def _sync_dependency_from_slurm(dep_subtask):
     """Check SLURM status for a dependency subtask and update its DB status.
@@ -73,18 +95,38 @@ def createtask(request):
     # default_storage.save(uploadfilepath+'input.h5ad', ContentFile(file.read()))
     # Make sure 'submitfile' is in request.FILES
     if 'submitfile' in request.FILES:
+        upload_path = os.path.join(uploadfilepath, 'input.h5ad')
         try:
             file = request.FILES['submitfile']
-            
-            with open(os.path.join(uploadfilepath, 'input.h5ad'), 'wb+') as destination:
+
+            total = 0
+            with open(upload_path, 'wb+') as destination:
                 for chunk in file.chunks():
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_SIZE:
+                        raise ValueError(
+                            f'File exceeds the maximum upload size of {MAX_UPLOAD_SIZE // (1024 * 1024)} MB'
+                        )
                     destination.write(chunk)
+                destination.flush()
+                if not _is_h5ad_content(destination):
+                    raise ValueError('Uploaded file is not a valid HDF5/h5ad file')
             print("File saved successfully:", uploadfilepath + 'input.h5ad')
+        except ValueError as e:
+            # delete the partial/oversized upload before responding
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
+            try:
+                os.removedirs(uploadfilepath)  # removes upload/ and the task dir if empty
+            except OSError:
+                pass
+            return Response({'status': 'Failed', 'message': str(e)}, status=400)
         except Exception as e:
             print("Upload error:", e)
+            if os.path.exists(upload_path):
+                os.remove(upload_path)
             return Response({'status': 'Failed', 'message': f'File upload failed: {str(e)}'}, status=500)
 
-        
     else:
         # If the file is missing, return an error
         return Response({'status': 'Failed', 'message': 'File "submitfile" not found in request.'}, status=400)

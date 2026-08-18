@@ -158,7 +158,16 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 30
+    'PAGE_SIZE': 30,
+    # Anonymous platform by design (userId cookie is only an ownership tag, not auth).
+    # Generous per-IP rate limit to block abuse without breaking the result page's
+    # bursty per-cluster polling (observed ~20 requests within 2s).
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '300/min',
+    },
 }
 
 MEDIA_URL = "/media/"
