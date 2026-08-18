@@ -61,7 +61,6 @@ decorator==4.4.2
 defusedxml==0.7.1
 deprecation==2.1.0
 Django==4.2.23
-django-crontab==0.7.1
 django-extensions==3.2.3
 django-filter==23.2
 django-picklefield==3.1
