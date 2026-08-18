@@ -76,15 +76,25 @@ class CommonMixin:
 
         transformed_data = {}
 
+        # Batch-resolve every matched dataset title in ONE query instead of one
+        # query per dataset (N+1): collect all uuids across organs, then look them
+        # up in an in-memory dict. Semantics match filter(title=x).first() since
+        # Dataset.title is unique.
+        all_uuids = set()
+        for datasets_dict in raw_data.values():
+            for original_path in datasets_dict:
+                u = self._extract_dataset_uuid(original_path)
+                if u:
+                    all_uuids.add(u)
+        by_title = {d.title: d for d in Dataset.objects.filter(title__in=all_uuids)}
+
         for organ_name, datasets_dict in raw_data.items():
             transformed_data[organ_name] = {}
             
             for original_path, scores in datasets_dict.items():
                 extracted_uuid = self._extract_dataset_uuid(original_path) or ""
 
-                db_obj = None
-                if extracted_uuid:
-                    db_obj = Dataset.objects.filter(title=extracted_uuid).first()
+                db_obj = by_title.get(extracted_uuid) if extracted_uuid else None
 
                 if db_obj:
                     new_key = db_obj.dataset_id

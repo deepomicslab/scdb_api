@@ -13,7 +13,7 @@ class TaskStatus(models.TextChoices):
 # SLURM active (non-terminal) states - used for checking if a job is still running
 SLURM_ACTIVE_STATES = frozenset({
     'PENDING', 'RUNNING', 'CONFIGURING', 'COMPLETING', 'REQUEUED', 'SUSPENDED',
-    'CREATED', 'PENDING',
+    'CREATED',
 })
 
 # Special pseudo job_id values (not real SLURM job IDs)
@@ -44,6 +44,7 @@ class tasks(models.Model):
         verbose_name_plural = verbose_name
         indexes = [
             models.Index(fields=['user'], name='idx_tasks_user'),
+            models.Index(fields=['userpath'], name='idx_tasks_userpath'),
         ]
 
     def __str__(self):

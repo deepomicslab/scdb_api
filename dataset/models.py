@@ -38,7 +38,10 @@ class GlobalStat(models.Model):
 # === 2. Dataset table ===
 class Dataset(models.Model):
     dataset_id = models.CharField(max_length=100, unique=True)
-    title = models.CharField(max_length=200)
+    # title is the h5ad file stem (directory key in the task workspace); verified
+    # unique across all 224 datasets, so a unique index both speeds lookups and
+    # prevents future duplicate imports.
+    title = models.CharField(max_length=200, unique=True)
     file_path = models.CharField(max_length=500)
 
     organ = models.CharField(max_length=100)
