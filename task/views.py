@@ -12,7 +12,7 @@ import os,traceback
 import time,random,json
 from scdb_api import settings_local as local_settings
 from utils import slurm_api
-from utils.slurm_api import normalize_slurm_status
+from utils.slurm_api import normalize_slurm_status, cancel_job
 from django.http import FileResponse
 import pandas as pd
 from utils.page import paginate_dataframe
@@ -141,40 +141,57 @@ def createtask(request):
     except (json.JSONDecodeError, TypeError) as e:
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
-    # create task object
+    # Track SLURM job submitted during module processing so we can scancel it if a
+    # later step fails (no orphan jobs when task creation partially succeeds).
+    submitted_job_ids = []
     res = {}
-    newtask = tasks.objects.create(
-            name=request.data['taskname'], user=request.data['userid'], userpath=usertask_dir,
-            task_type=request.data['tasktype'], status=TaskStatus.CREATED, modulelist=request.data['modulename'])
-    
-    # create module object and run the task
-    if newtask.task_type == 'module':
-        try:
-            cls = get_module_class(request.data['modulename'])
+    try:
+        with transaction.atomic():
+            # create task object
+            newtask = tasks.objects.create(
+                    name=request.data['taskname'], user=request.data['userid'], userpath=usertask_dir,
+                    task_type=request.data['tasktype'], status=TaskStatus.CREATED, modulelist=request.data['modulename'])
             
-            if cls is None:
-                res['status'] = 'Failed'
-                newtask.status = TaskStatus.FAILED
-                res['message'] = 'module not found'
-                raise ValueError('module not found')
+            # create module object and run the task
+            if newtask.task_type == 'module':
+                try:
+                    cls = get_module_class(request.data['modulename'])
+                    
+                    if cls is None:
+                        res['status'] = 'Failed'
+                        newtask.status = TaskStatus.FAILED
+                        res['message'] = 'module not found'
+                        raise ValueError('module not found')
 
-            else:
-                newmodule = cls(request.data['taskname'],usertask_dir,parameters_dict)
-                job_id = newmodule.process()
+                    else:
+                        newmodule = cls(request.data['taskname'],usertask_dir,parameters_dict)
+                        job_id = newmodule.process()
+                        submitted_job_ids.append(job_id)
 
-                taskdetailjson=[{'modulename':request.data['modulename'],'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
-                with open(userpath+'/'+'taskdetail.json', 'w') as f:
-                    json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
-                newtask.status = TaskStatus.RUNNING
-                res['status'] = 'Success'
-                res['message'] = 'task create successfully'
-                res['data'] = {'taskid': newtask.id}
-        except Exception as e:
-            res['status'] = 'Failed'
-            res['message'] = str(e)
-            newtask.status = 'Failed'
-            traceback.print_exc()
-    newtask.save()
+                        taskdetailjson=[{'modulename':request.data['modulename'],'parameters_dict': parameters_dict, 'job_id': job_id, 'status': 'Created'}]
+                        with open(userpath+'/'+'taskdetail.json', 'w') as f:
+                            json.dump(taskdetailjson, f, ensure_ascii=False, indent=4)
+                        newtask.status = TaskStatus.RUNNING
+                        res['status'] = 'Success'
+                        res['message'] = 'task create successfully'
+                        res['data'] = {'taskid': newtask.id}
+                except Exception as e:
+                    res['status'] = 'Failed'
+                    res['message'] = str(e)
+                    newtask.status = 'Failed'
+                    traceback.print_exc()
+            newtask.save()
+    except Exception as e:
+        # DB rollback already happened via transaction.atomic; clean up the SLURM
+        # job (if any was submitted) and the created task directory on disk.
+        for jid in submitted_job_ids:
+            cancel_job(jid)
+        import shutil
+        if os.path.exists(userpath):
+            shutil.rmtree(userpath, ignore_errors=True)
+        if not res:
+            res = {'status': 'Failed', 'message': f'Task creation failed: {str(e)}'}
+        return Response(res)
     return Response(res)
 
 

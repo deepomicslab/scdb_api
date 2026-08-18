@@ -235,3 +235,59 @@ class CreateSubtaskAtomicityTests(TestCase):
         self.assertEqual(SubTask.objects.filter(main_task=self.main_task).count(), 0)
         # the already-submitted prereq SLURM job was cancelled
         self.assertEqual(cancelled, ['101'])
+
+
+class CreateTaskAtomicityTests(TestCase):
+    """createtask: transaction rollback + scancel + task-dir cleanup on failure."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def test_module_failure_rolls_back_row_cleans_dir(self):
+        from unittest import mock
+
+        from django.test import Client
+        import task.views as views
+        from task.models import tasks as task_model
+
+        cancelled = []
+
+        class FailingModule:
+            def __init__(self, *a, **k):
+                pass
+
+            def process(self):
+                raise RuntimeError('sbatch boom')
+
+        tmp_workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+
+        c = Client()
+        with mock.patch.object(views, 'cancel_job', side_effect=lambda jid: cancelled.append(jid)), \
+                mock.patch.object(views, 'get_module_class', return_value=FailingModule), \
+                mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
+            with open(os.path.join(tmp_workspace, 'blank'), 'wb') as f:
+                f.write(b'\x89HDF\r\n\x1a\n' + b'xxx')
+            with open(os.path.join(tmp_workspace, 'blank'), 'rb') as f:
+                resp = c.post('/tasks/createtask/', {
+                    'submitfile': f,
+                    'parameters': '{"a":1}',
+                    'taskname': 't',
+                    'userid': 'u',
+                    'tasktype': 'module',
+                    'modulename': 'Scstquery',
+                })
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json().get('status'), 'Failed')
+        # no task row survives
+        self.assertEqual(task_model.objects.filter(user='u').count(), 0)
+        # no job was submitted so nothing to cancel
+        self.assertEqual(cancelled, [])
+        # the created task directory was cleaned up (only the fixture file remains)
+        leftovers = [p for p in os.listdir(tmp_workspace) if p != 'blank']
+        self.assertEqual(leftovers, [])
