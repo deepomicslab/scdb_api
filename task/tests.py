@@ -108,7 +108,7 @@ class DownloadSecurityTests(TestCase):
 
 
 class UploadValidationTests(TestCase):
-    """createtask upload guards: HDF5 magic-byte detection."""
+    """createtask upload guards: HDF5 magic-byte detection + h5ad structure."""
 
     @classmethod
     def setUpClass(cls):
@@ -119,12 +119,20 @@ class UploadValidationTests(TestCase):
         from task import views
 
         cls._is_h5ad_content = staticmethod(views._is_h5ad_content)
+        cls._is_valid_h5ad = staticmethod(views._is_valid_h5ad)
 
     def _write_bytes(self, data):
         import io
 
         f = io.BytesIO(data)
         return f
+
+    def _write_h5(self, path, keys):
+        import h5py
+
+        with h5py.File(path, 'w') as f:
+            for k in keys:
+                f.create_dataset(k, data=[1, 2, 3])
 
     def test_valid_hdf5_magic_accepted(self):
         f = self._write_bytes(b'\x89HDF\r\n\x1a\n' + b'rest-of-file')
@@ -141,6 +149,25 @@ class UploadValidationTests(TestCase):
     def test_short_header_rejected(self):
         f = self._write_bytes(b'\x89HDF\r\n\x1a')  # 7 bytes, one short
         self.assertFalse(self._is_h5ad_content(f))
+
+    def test_valid_h5ad_with_required_keys_accepted(self):
+        path = os.path.join(tempfile.mkdtemp(), 'x.h5ad')
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        self._write_h5(path, ['X', 'obs', 'var'])
+        self.assertTrue(self._is_valid_h5ad(path))
+
+    def test_hdf5_without_required_keys_rejected(self):
+        path = os.path.join(tempfile.mkdtemp(), 'x.h5ad')
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        self._write_h5(path, ['only_a_dataset'])
+        self.assertFalse(self._is_valid_h5ad(path))
+
+    def test_non_h5ad_rejected(self):
+        path = os.path.join(tempfile.mkdtemp(), 'x.h5ad')
+        self.addCleanup(shutil.rmtree, os.path.dirname(path), ignore_errors=True)
+        with open(path, 'w') as f:
+            f.write('not a hdf5 file at all')
+        self.assertFalse(self._is_valid_h5ad(path))
 
 
 class CreateSubtaskAtomicityTests(TestCase):

@@ -43,6 +43,26 @@ def _is_h5ad_content(file_obj):
         return False
 
 
+# h5ad files must expose these root groups/datasets (anndata convention).
+_H5AD_REQUIRED_KEYS = ('X', 'obs', 'var')
+
+
+def _is_valid_h5ad(path):
+    """Verify an uploaded file is a real h5ad container.
+
+    Beyond the HDF5 magic bytes, this opens the file with h5py (lazy: only reads
+    the superblock + root group) and requires the anndata root keys X/obs/var to
+    be present. Catches 'valid HDF5 but not h5ad' uploads (e.g. renamed .h5 files)
+    that would otherwise only fail deep inside the SLURM pipeline.
+    """
+    try:
+        import h5py
+        with h5py.File(path, 'r') as f:
+            return all(key in f for key in _H5AD_REQUIRED_KEYS)
+    except Exception:
+        return False
+
+
 
 def _sync_dependency_from_slurm(dep_subtask):
     """Check SLURM status for a dependency subtask and update its DB status.
@@ -110,8 +130,12 @@ def createtask(request):
                         )
                     destination.write(chunk)
                 destination.flush()
+                # fast fail on the HDF5 magic before the deeper structural check
                 if not _is_h5ad_content(destination):
                     raise ValueError('Uploaded file is not a valid HDF5/h5ad file')
+            # file is closed here; h5py validation opens it read-only (lazy superblock read)
+            if not _is_valid_h5ad(upload_path):
+                raise ValueError('Uploaded file is not a valid h5ad (missing X/obs/var)')
             print("File saved successfully:", uploadfilepath + 'input.h5ad')
         except ValueError as e:
             # delete the partial/oversized upload before responding
