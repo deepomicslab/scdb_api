@@ -177,6 +177,9 @@ class CreateSubtaskAtomicityTests(TestCase):
             def __init__(self, *a, **k):
                 pass
 
+            def add_dependency(self, *a, **k):
+                pass
+
             def process(self):
                 raise RuntimeError('sbatch boom')
 
@@ -201,6 +204,9 @@ class CreateSubtaskAtomicityTests(TestCase):
 
         class FailingMain:
             def __init__(self, *a, **k):
+                pass
+
+            def add_dependency(self, *a, **k):
                 pass
 
             def process(self):
