@@ -52,9 +52,10 @@ class OrgansAndDatasetsBatchQueryTests(TestCase):
 
         self.mixin = CommonMixin()
         self.mixin.path = self.task_root
-        # _extract_dataset_uuid normally comes from the Module base class; reuse the
-        # same standalone function so the mixin can be tested on its own.
-        self.mixin._extract_dataset_uuid = staticmethod(extract_dataset_uuid)
+        # _extract_dataset_uuid normally comes from the Module base class; assign the
+        # same standalone function as a plain instance attribute so the mixin can be
+        # tested on its own.
+        self.mixin._extract_dataset_uuid = extract_dataset_uuid
 
     def tearDown(self):
         import shutil
