@@ -8,6 +8,27 @@ from utils.page import paginate_dataframe
 from dataset.models import Dataset
 
 
+# Bare-filename compatibility layer for the legacy filelist contract: the current
+# frontend (useFileList / legacy Scquery pages) sends plain names without a directory,
+# so they are looked up in these result directories. Relative paths that contain a
+# separator are instead resolved against the whole task root (self.path), which lets
+# subtask results (dataset_{uuid}/subtask_{type}/result/...) be downloaded without
+# extending this list.
+_DOWNLOAD_BARE_DIRS = (
+    'result/sc_marker',
+    'result/sc_query/annotation_h5ad',
+    'result/meta',
+)
+
+# Server-internal metadata that must never be downloadable: they embed absolute server
+# paths / serialized module objects and would leak the same info the platform otherwise
+# sanitizes (path de-identification, "never store server paths").
+_DOWNLOAD_EXCLUDED = {
+    'taskdetail.json',
+    'moduleobject.pkl',
+}
+
+
 class CommonMixin:
     """Common result methods for Scstquery: metadata, datasets, downloads, images."""
 
@@ -163,26 +184,59 @@ class CommonMixin:
         return res
 
     def download(self, filename):
-        if filename.endswith('.h5ad'):
-            filepath = os.path.join(self.path, 'result/sc_query/annotation_h5ad', filename)
-        elif filename.endswith('.txt'):
-            filepath = os.path.join(self.path, 'result/meta', filename)
-        elif filename.endswith('.csv'):
-            filepath = os.path.join(self.path, 'result/sc_marker', filename)
-        if os.path.exists(filepath):
+        """Read a file from the task workspace and return it base64-encoded (legacy JSON contract).
+
+        The download boundary is the whole task directory (self.path): any relative path
+        inside it can be fetched, so subtask results under dataset_{uuid}/subtask_*/result/
+        are supported without extra whitelisting. Bare filenames (no separator) keep the old
+        filelist behavior and are looked up in _DOWNLOAD_BARE_DIRS.
+
+        Safety: rejects absolute paths, ".." traversal, and symlinks that resolve outside
+        the task root; server-internal metadata files are excluded.
+        """
+        # 1. Basic sanity: non-empty, not absolute, no ".." segments, no backslashes
+        if not filename or os.path.isabs(filename) or '\\' in filename:
+            return {'status': 'fail', 'message': 'Invalid filename.'}
+        parts = filename.split('/')
+        if any(p in ('', '.', '..') for p in parts):
+            return {'status': 'fail', 'message': 'Invalid filename.'}
+        # never expose server-internal metadata
+        if parts[-1] in _DOWNLOAD_EXCLUDED:
+            return {'status': 'fail', 'message': 'Invalid filename.'}
+
+        task_root = os.path.realpath(self.path)
+
+        # 2. Resolve candidates: bare names search the legacy dirs, paths with separators
+        #    resolve directly against the task root.
+        if '/' in filename:
+            candidates = [os.path.join(task_root, filename)]
+        else:
+            candidates = [os.path.join(task_root, d, filename) for d in _DOWNLOAD_BARE_DIRS]
+
+        for candidate in candidates:
+            real = os.path.realpath(candidate)
+            # containment guard: final path must stay inside the task root (blocks symlink escape)
+            if os.path.commonpath([task_root, real]) != task_root:
+                continue
+            if not os.path.isfile(real):
+                continue
             try:
-                with open(filepath, 'rb') as f:
+                with open(real, 'rb') as f:
                     file_content = f.read()
                     import base64
                     file_content_base64 = base64.b64encode(file_content).decode('utf-8')
-                    res = {'filename': filename, 'file_content': file_content_base64, 'status': 'success', 'message': "read file successfully."}
+                    return {
+                        'filename': filename,
+                        'file_content': file_content_base64,
+                        'status': 'success',
+                        'message': "read file successfully.",
+                    }
             except Exception as e:
                 print(f"Error reading file: {e}")
-                res = {'status': 'fail', 'message': "File cannot be read."}
-        else:
-            print(f"{filename} does not exist in {filepath}")
-            res = {'status': 'fail', 'message': "File is not existed."}
-        return res
+                return {'status': 'fail', 'message': "File cannot be read."}
+
+        print(f"{filename} does not exist in the task workspace")
+        return {'status': 'fail', 'message': "File is not existed."}
     
     def getdownloadfilelist(self, flag):
         filelist = {}
