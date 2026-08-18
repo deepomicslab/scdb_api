@@ -6,6 +6,9 @@ from django.db import models, transaction
 from django.db.models import Sum, Count
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
+from utils.logging import get_logger
+
+logger = get_logger('dataset_models')
 
 CELL_TYPE_COL = 'cell_type'
 
@@ -111,7 +114,7 @@ class Dataset(models.Model):
                     counts = adata.obs[CELL_TYPE_COL].value_counts().to_dict()
                     self.cell_type_counts = {str(k): int(v) for k, v in counts.items()}
         except Exception as e:
-            print(f"[Dataset._extract_metadata] Failed to read {self.file_path}: {e}")
+            logger.warning('[Dataset._extract_metadata] Failed to read %s: %s', self.file_path, e)
 
         # Spatial calibration (h5py reads scalars/metadata only; local import
         # avoids a circular import with utils.spatial_calibration)
@@ -181,7 +184,7 @@ class Dataset(models.Model):
             if not self.image_dir:
                 self.image_dir = image_dir
         except Exception as e:
-            print(f"[Dataset._extract_images] Failed for {file_path}: {e}")
+            logger.warning('[Dataset._extract_images] Failed for %s: %s', file_path, e)
 
 
 # === 3. Signal: auto-refresh global stats on Dataset save/delete ===

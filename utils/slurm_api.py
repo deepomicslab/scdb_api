@@ -1,6 +1,9 @@
 import subprocess
 import re
-import sys
+
+from utils.logging import get_logger
+
+logger = get_logger('slurm_api')
 
 
 # Mapping from raw SLURM status to normalized TaskStatus values
@@ -41,7 +44,7 @@ def get_job_status(job_id):
         if len(lines) > 1:
             return lines[1].strip()
     except subprocess.CalledProcessError as e:
-        print("squeue check error:", e, file=sys.stderr)
+        logger.warning('squeue check error for job %s: %s', job_id, e)
         pass
 
     sacct_command = ["sacct", "--jobs",
@@ -49,7 +52,7 @@ def get_job_status(job_id):
     try:
         sacct_output = subprocess.check_output(sacct_command).decode("utf-8")
     except subprocess.CalledProcessError as e:
-        print("sacct check error:", e, file=sys.stderr)
+        logger.warning('sacct check error for job %s: %s', job_id, e)
         return None
     lines = sacct_output.strip().split("\n")
     for line in lines[1:]:
@@ -92,7 +95,7 @@ def cancel_job(job_id):
             timeout=30,
         )
     except Exception as e:
-        print(f"scancel {job_id} error: {e}", file=sys.stderr)
+        logger.warning('scancel %s error: %s', job_id, e)
     return job_id
 
 

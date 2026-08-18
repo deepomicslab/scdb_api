@@ -172,3 +172,31 @@ REST_FRAMEWORK = {
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '{asctime} {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            # stdout (not stderr) so business logs ride the run_prod.sh tee chain
+            # into logs/app.log (gunicorn's own logs stay on stderr -> error.log)
+            'stream': 'ext://sys.stdout',
+            'formatter': 'standard',
+        },
+    },
+    'loggers': {
+        # Business namespace: structured INFO logs with context ids in the message
+        'scdb': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        # django.request errors only; avoid flooding app.log with normal traffic
+        'django': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+}

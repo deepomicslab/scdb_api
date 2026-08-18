@@ -170,6 +170,29 @@ class UploadValidationTests(TestCase):
         self.assertFalse(self._is_valid_h5ad(path))
 
 
+class LoggingConfigTests(TestCase):
+    """LOGGING dict in settings: scdb logger wired to a stdout StreamHandler."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def test_scdb_logger_has_console_handler(self):
+        import logging
+
+        from utils.logging import logger
+
+        handlers = [h for h in logger.handlers]
+        self.assertTrue(handlers, 'scdb logger should have at least one handler')
+        stream_handler = next((h for h in handlers if isinstance(h, logging.StreamHandler)), None)
+        self.assertIsNotNone(stream_handler, 'expected a StreamHandler on scdb logger')
+        # stdout (not stderr) so logs ride the tee chain into app.log
+        self.assertEqual(stream_handler.stream, __import__('sys').stdout)
+
+
 class CreateSubtaskAtomicityTests(TestCase):
     """create_subtask: transaction rollback + scancel of submitted jobs on failure."""
 

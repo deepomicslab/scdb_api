@@ -15,6 +15,9 @@ from utils.mapping_paths import check_mapping_completed
 from scdb_api import settings_local as local_settings
 import utils.analysis
 from utils.slurm_api import cancel_job
+from utils.logging import get_logger
+
+logger = get_logger('services')
 
 
 # Module whitelist registry (replaces unsafe getattr)
@@ -110,7 +113,8 @@ def _chain_prerequisite(cls, prereq_type, usertask_dir, dataset_uuid,
         job_id=prereq_job_id,
         parameters=prereq_params,
     )
-    print(f'Auto-created {prereq_type} subtask id={prereq_subtask.id}, job_id={prereq_job_id}')
+    logger.info('Auto-created %s subtask id=%s job_id=%s',
+                prereq_type, prereq_subtask.id, prereq_job_id)
     return prereq_module, prereq_job_id, prereq_subtask
 
 

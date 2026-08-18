@@ -6,6 +6,9 @@ from pathlib import Path
 from scdb_api import settings_local as local_settings
 from utils.page import paginate_dataframe
 from dataset.models import Dataset
+from utils.logging import get_logger
+
+logger = get_logger('mixin_common')
 
 
 # Bare-filename compatibility layer for the legacy filelist contract: the current
@@ -242,10 +245,10 @@ class CommonMixin:
                         'message': "read file successfully.",
                     }
             except Exception as e:
-                print(f"Error reading file: {e}")
+                logger.warning('Error reading file %s: %s', filename, e)
                 return {'status': 'fail', 'message': "File cannot be read."}
 
-        print(f"{filename} does not exist in the task workspace")
+        logger.info('File %s does not exist in the task workspace', filename)
         return {'status': 'fail', 'message': "File is not existed."}
     
     def getdownloadfilelist(self, flag):
@@ -258,7 +261,7 @@ class CommonMixin:
                     if file.endswith('_marker.csv') or file.endswith('_clusters.csv'):
                         filelist['csv'].append(file)
             else:
-                print(f"Directory {input_dir_path} does not exist.")
+                logger.info('Directory %s does not exist.', input_dir_path)
         elif flag == "output":
             filelist['h5ad'] = []
             output_h5ad_dir_path = os.path.join(self.path, 'result/sc_query/annotation_h5ad')
@@ -267,7 +270,7 @@ class CommonMixin:
                     if file.endswith('.h5ad'):
                         filelist['h5ad'].append(file)
             else:
-                print(f"Directory {output_h5ad_dir_path} does not exist.")
+                logger.info('Directory %s does not exist.', output_h5ad_dir_path)
             
             filelist['meta'] = []
             output_meta_dir_path = os.path.join(self.path, 'result/meta')
@@ -276,7 +279,7 @@ class CommonMixin:
                     if file.endswith('_meta_data_addquerycell.txt'):
                         filelist['meta'].append(file)
             else:
-                print(f"Directory {output_meta_dir_path} does not exist.")
+                logger.info('Directory %s does not exist.', output_meta_dir_path)
         else:
             res = {'status': 'fail', 'message': "Wrong filelist type."}
             return res

@@ -4,6 +4,9 @@ import threading
 import time
 from django.apps import AppConfig
 from django.core.management import call_command
+from utils.logging import get_logger
+
+logger = get_logger('core')
 
 
 class CoreConfig(AppConfig):
@@ -26,9 +29,9 @@ class CoreConfig(AppConfig):
                 try:
                     call_command('scheduled')
                 except Exception as e:
-                    print('[core.scheduler] scheduled error:', e)
+                    logger.warning('[core.scheduler] scheduled error: %s', e)
                 time.sleep(60)
 
         t = threading.Thread(target=loop, daemon=True, name='core-scheduler')
         t.start()
-        print('[core.scheduler] started, will run scheduled every 60s')
+        logger.info('[core.scheduler] started, will run scheduled every 60s')

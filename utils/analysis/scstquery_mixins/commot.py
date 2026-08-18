@@ -5,6 +5,9 @@ import scanpy as sc
 import pandas as pd
 from collections import OrderedDict
 from dataset.models import Dataset
+from utils.logging import get_logger
+
+logger = get_logger('mixin_commot')
 
 
 # commot *_LR.h5ad handle cache: mtime-aware + LRU capped at 2 files.
@@ -60,7 +63,7 @@ class CommotMixin:
                 return base
             return None
         except Exception as e:
-            print(f"[commot] Dataset lookup failed: {e}")
+           logger.warning('[commot] Dataset lookup failed: %s', e)
         return None
 
     def _find_commot_file(self, result_dir, pattern='*_LR.h5ad'):

@@ -11,6 +11,9 @@ from collections import Counter
 
 from .models import Dataset, GlobalStat
 from utils.spatial_calibration import read_spatial_calibration
+from utils.logging import get_logger
+
+logger = get_logger('dataset_views')
 
 # ================================
 # 1. Global stats (Hero Stats) - very fast
@@ -292,7 +295,7 @@ def detail_scatter(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print('[detail_scatter]', e)
+        logger.warning('[detail_scatter] %s', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)
     
 
@@ -497,7 +500,7 @@ def dataset_gene_expression(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print('[gene_expression]', e)
+        logger.warning('[gene_expression] %s', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)
 
 
@@ -572,5 +575,5 @@ def dataset_gene_suggest(request, dataset_id):
         return Response(body)
 
     except Exception as e:
-        print('[gene_suggest]', e)
+        logger.warning('[gene_suggest] %s', e)
         return Response({'status': 'error', 'message': str(e)}, status=500)

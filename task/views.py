@@ -20,6 +20,9 @@ from utils.fileprocess import get_gene_list,get_cluster_list
 from utils.mapping_paths import check_mapping_completed
 import pickle
 from utils.spatial_calibration import IMAGE_RES_SPECS
+from utils.logging import get_logger
+
+logger = get_logger('views')
 
 # Maximum accepted h5ad upload size (bytes). Checked incrementally while streaming
 # chunks to disk, so oversized uploads are aborted before they can fill /data3.
@@ -136,7 +139,7 @@ def createtask(request):
             # file is closed here; h5py validation opens it read-only (lazy superblock read)
             if not _is_valid_h5ad(upload_path):
                 raise ValueError('Uploaded file is not a valid h5ad (missing X/obs/var)')
-            print("File saved successfully:", uploadfilepath + 'input.h5ad')
+            logger.info('File saved successfully: %s', uploadfilepath + 'input.h5ad')
         except ValueError as e:
             # delete the partial/oversized upload before responding
             if os.path.exists(upload_path):
@@ -147,7 +150,7 @@ def createtask(request):
                 pass
             return Response({'status': 'Failed', 'message': str(e)}, status=400)
         except Exception as e:
-            print("Upload error:", e)
+            logger.error('Upload error: %s', e)
             if os.path.exists(upload_path):
                 os.remove(upload_path)
             return Response({'status': 'Failed', 'message': f'File upload failed: {str(e)}'}, status=500)
@@ -386,7 +389,7 @@ def _ensure_resolution_image(cache_path, hires_path, max_size, save_kwargs):
             img.save(cache_path, 'JPEG', **save_kwargs)
         return True
     except Exception as e:
-        print(f"[getImg] _ensure_resolution_image failed: {e}")
+        logger.warning('[getImg] _ensure_resolution_image failed: %s', e)
         return False
 
 
@@ -462,7 +465,7 @@ def getImg(request):
                                     )
                                 return _img_file_response(cache_path, content_type)
             except Exception as e:
-                print(f"[getImg] error extracting image for {image_id}: {e}")
+                logger.warning('[getImg] error extracting image for %s: %s', image_id, e)
             return Response({'message': "No image for this dataset."}, status=404)
 
         return _img_file_response(cache_path, content_type)
@@ -533,7 +536,7 @@ def subtask_status_update(request):
         # select_for_update(nowait=True) raises here when another poller holds
         # the row lock; that's expected under concurrent polling - just report
         # the current DB state and let the next poll converge.
-        traceback.print_exc()
+        logger.warning('subtask poll lock contention subtask_id=%s', subtaskid)
         try:
             subtask = SubTask.objects.get(id=subtaskid)
             return Response({
