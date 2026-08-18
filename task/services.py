@@ -10,6 +10,7 @@ from django.db import transaction
 
 from task.models import tasks, SubTask, TaskStatus
 from dataset.models import Dataset
+from utils.analysis.base import resolve_marker_path
 from utils.mapping_paths import check_mapping_completed
 from scdb_api import settings_local as local_settings
 import utils.analysis
@@ -126,8 +127,6 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     were already submitted (prerequisite chain / main job) are scancel'ed, so
     we never leave orphan jobs consuming cluster resources.
     """
-    from utils.analysis.base import resolve_marker_path
-
     usertask_dir = main_task.userpath
     parameters_dict['userid'] = userid
     parameters_dict['dataset_id'] = dataset_id
