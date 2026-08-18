@@ -320,9 +320,13 @@ class CreateTaskAtomicityTests(TestCase):
         with mock.patch.object(views, 'cancel_job', side_effect=lambda jid: cancelled.append(jid)), \
                 mock.patch.object(views, 'get_module_class', return_value=FailingModule), \
                 mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
-            with open(os.path.join(tmp_workspace, 'blank'), 'wb') as f:
-                f.write(b'\x89HDF\r\n\x1a\n' + b'xxx')
-            with open(os.path.join(tmp_workspace, 'blank'), 'rb') as f:
+            # a real minimal h5ad so the upload passes magic + deep X/obs/var validation
+            upload_path = os.path.join(tmp_workspace, 'input.h5ad')
+            import h5py
+            with h5py.File(upload_path, 'w') as hf:
+                for k in ('X', 'obs', 'var'):
+                    hf.create_dataset(k, data=[1, 2, 3])
+            with open(upload_path, 'rb') as f:
                 resp = c.post('/tasks/createtask/', {
                     'submitfile': f,
                     'parameters': '{"a":1}',
@@ -341,5 +345,5 @@ class CreateTaskAtomicityTests(TestCase):
         # no job was submitted so nothing to cancel
         self.assertEqual(cancelled, [])
         # the task directory is kept on disk for later inspection
-        leftovers = [p for p in os.listdir(tmp_workspace) if p != 'blank']
+        leftovers = [p for p in os.listdir(tmp_workspace) if p != 'input.h5ad']
         self.assertEqual(len(leftovers), 1)
