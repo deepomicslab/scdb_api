@@ -103,7 +103,7 @@ class Module:
                     prev_status = st.status
                     new_status = st.sync_from_slurm()
                     if new_status and new_status != prev_status:
-                        st.save()
+                        st.save(update_fields=['status', 'updated_at'])
                 except Exception:
                     pass
 

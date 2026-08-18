@@ -6,11 +6,14 @@ providing a clean API with module whitelist and prerequisite chaining.
 import os
 import json
 
+from django.db import transaction
+
 from task.models import tasks, SubTask, TaskStatus
 from dataset.models import Dataset
 from utils.mapping_paths import check_mapping_completed
 from scdb_api import settings_local as local_settings
 import utils.analysis
+from utils.slurm_api import cancel_job
 
 
 # Module whitelist registry (replaces unsafe getattr)
@@ -80,6 +83,10 @@ def _chain_prerequisite(cls, prereq_type, usertask_dir, dataset_uuid,
     """Auto-submit a prerequisite subtask (HC or HE scatter) to SLURM.
 
     Returns (job_id, subtask_id) if submitted, or (None, None) if not.
+
+    The submitted job_id is returned to create_subtask, which tracks it and
+    scancels it if any later step of the chain fails (no orphan SLURM jobs).
+    The DB row and the whole chain live inside create_subtask's transaction.
     """
     prereq_params = params.copy()
     prereq_params['sub_type'] = prereq_type
@@ -113,6 +120,11 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     server path sent by the client.
     Returns dict: {'status', 'message', 'data': {'subtaskid'}}
     Raises ValueError for validation failures.
+
+    Atomicity: the whole flow (DB rows + SLURM submissions) runs in one
+    transaction. If any step fails, DB rows roll back AND any SLURM jobs that
+    were already submitted (prerequisite chain / main job) are scancel'ed, so
+    we never leave orphan jobs consuming cluster resources.
     """
     from utils.analysis.base import resolve_marker_path
 
@@ -122,6 +134,26 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
     if 'projectname' not in parameters_dict:
         parameters_dict['projectname'] = 'test'
 
+    # job ids submitted so far in this attempt (prereqs then main); on failure
+    # these are all cancelled before re-raising
+    submitted_job_ids = []
+
+    try:
+        with transaction.atomic():
+            return _create_subtask_tx(
+                main_task, usertask_dir, dataset_id, subtasktype, parameters_dict,
+                submitted_job_ids,
+            )
+    except Exception:
+        # best-effort cleanup of already-submitted SLURM jobs, then re-raise so
+        # the view returns the original error (DB rollback already happened)
+        for jid in submitted_job_ids:
+            cancel_job(jid)
+        raise
+
+
+def _create_subtask_tx(main_task, usertask_dir, dataset_id, subtasktype,
+                       parameters_dict, submitted_job_ids):
     # Create subtask DB record
     new_subtask = SubTask.objects.create(
         main_task=main_task,
@@ -204,6 +236,7 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
                 new_submodule.add_dependency(prereq_module)
                 parameters_dict[chain_config['subtask_id_key']] = prereq_subtask.id
                 parameters_dict[chain_config['job_id_key']] = prereq_job_id
+                submitted_job_ids.append(prereq_job_id)
 
     # Explicit mapping dependency check for commot/cellchat/spider
     if subtasktype in MAPPING_DEPENDENT_TYPES:
@@ -218,6 +251,7 @@ def create_subtask(main_task, userid, dataset_id, subtasktype, parameters_dict):
 
     # Submit the main subtask
     job_id = new_submodule.process()
+    submitted_job_ids.append(job_id)
 
     new_subtask.job_id = job_id
     new_subtask.status = new_submodule.status if new_submodule.status else TaskStatus.RUNNING

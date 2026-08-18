@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import viewsets
+from django.db import transaction, DatabaseError
 import os,traceback
 import time,random,json
 from scdb_api import settings_local as local_settings
@@ -57,7 +58,7 @@ def _sync_dependency_from_slurm(dep_subtask):
     try:
         new_status = dep_subtask.sync_from_slurm()
         if new_status and new_status != dep_subtask.status:
-            dep_subtask.save()
+            dep_subtask.save(update_fields=['status', 'updated_at'])
     except Exception:
         pass
 
@@ -485,7 +486,35 @@ def subtask_status_update(request):
         return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
 
     try:
-        subtask = SubTask.objects.get(id=subtaskid)
+        with transaction.atomic():
+            return _subtask_status_update_locked(subtaskid)
+    except DatabaseError:
+        # select_for_update(nowait=True) raises here when another poller holds
+        # the row lock; that's expected under concurrent polling - just report
+        # the current DB state and let the next poll converge.
+        traceback.print_exc()
+        try:
+            subtask = SubTask.objects.get(id=subtaskid)
+            return Response({
+                'status': 'Success',
+                'current_status': subtask.status,
+                'job_id': subtask.job_id,
+                'message': 'Status update in progress by another poll; try again shortly.'
+            })
+        except SubTask.DoesNotExist:
+            return Response({'status': 'Failed', 'message': f'SubTask with ID {subtaskid} not found.'}, status=404)
+
+
+def _subtask_status_update_locked(subtaskid):
+    """Inner implementation of subtask_status_update running under a row lock.
+
+    select_for_update(nowait=True) serializes concurrent polls on the same
+    subtask: the first poller updates, later ones fail fast with DatabaseError
+    (handled by the caller) instead of each running squeue/sacct and
+    last-write-wins-saving the full row.
+    """
+    try:
+        subtask = SubTask.objects.select_for_update(nowait=True).get(id=subtaskid)
     except SubTask.DoesNotExist:
         return Response({'status': 'Failed', 'message': f'Subtask with ID {subtaskid} not found.'}, status=404)
 
@@ -531,7 +560,7 @@ def subtask_status_update(request):
         if hc_subtask and (hc_subtask.status or '').upper() == 'COMPLETED':
             subtask.status = TaskStatus.COMPLETED
             subtask.job_id = 'viewer_only'
-            subtask.save()
+            subtask.save(update_fields=['status', 'job_id', 'updated_at'])
             return Response({
                 'status': 'Success',
                 'current_status': TaskStatus.COMPLETED,
@@ -558,7 +587,7 @@ def subtask_status_update(request):
         if hs_subtask and (hs_subtask.status or '').upper() == 'COMPLETED':
             subtask.status = TaskStatus.COMPLETED
             subtask.job_id = 'viewer_only'
-            subtask.save()
+            subtask.save(update_fields=['status', 'job_id', 'updated_at'])
             return Response({
                 'status': 'Success',
                 'current_status': TaskStatus.COMPLETED,
@@ -586,7 +615,7 @@ def subtask_status_update(request):
         if scgpt_subtask and (scgpt_subtask.status or '').upper() == 'COMPLETED':
             subtask.status = TaskStatus.COMPLETED
             subtask.job_id = 'viewer_only'
-            subtask.save()
+            subtask.save(update_fields=['status', 'job_id', 'updated_at'])
             return Response({
                 'status': 'Success',
                 'current_status': TaskStatus.COMPLETED,
@@ -625,7 +654,7 @@ def subtask_status_update(request):
 
         if new_status != current_db_status:
             subtask.status = new_status
-            subtask.save()
+            subtask.save(update_fields=['status', 'updated_at'])
 
         return Response({
             'status': 'Success',

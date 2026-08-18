@@ -141,3 +141,91 @@ class UploadValidationTests(TestCase):
     def test_short_header_rejected(self):
         f = self._write_bytes(b'\x89HDF\r\n\x1a')  # 7 bytes, one short
         self.assertFalse(self._is_h5ad_content(f))
+
+
+class CreateSubtaskAtomicityTests(TestCase):
+    """create_subtask: transaction rollback + scancel of submitted jobs on failure."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from task.models import tasks as task_model
+
+        self.main_task = task_model.objects.create(
+            name='t', user='u', userpath='u12345_0001',
+            task_type='module', status='Created', modulelist='Scstquery',
+        )
+
+    def tearDown(self):
+        from task.models import tasks as task_model
+
+        task_model.objects.filter(id=self.main_task.id).delete()
+
+    def test_failed_main_sbatch_rolls_back(self):
+        """If the main subtask sbatch fails, the subtask row must not survive."""
+        from unittest import mock
+
+        import task.services as services
+        from task.models import SubTask
+
+        class FailingModule:
+            def __init__(self, *a, **k):
+                pass
+
+            def process(self):
+                raise RuntimeError('sbatch boom')
+
+        with mock.patch.object(services, 'MODULE_REGISTRY',
+                               {'SubScstquery': FailingModule}):
+            with self.assertRaises(RuntimeError):
+                services.create_subtask(
+                    self.main_task, 'u', 'DS_X', 'scst_mapping', {}
+                )
+
+        self.assertEqual(SubTask.objects.filter(main_task=self.main_task).count(), 0)
+
+    def test_prereq_submitted_then_main_fails_cancels_prereq_and_rolls_back(self):
+        """umap_embedding chains scgpt_embedding: prereq job is submitted, then the
+        main sbatch fails -> the prereq job must be scanceled and all rows rolled back."""
+        from unittest import mock
+
+        import task.services as services
+        from task.models import SubTask
+
+        cancelled = []
+
+        class FailingMain:
+            def __init__(self, *a, **k):
+                pass
+
+            def process(self):
+                raise RuntimeError('main sbatch boom')
+
+        def fake_chain(cls, *a, **k):
+            prereq_row = SubTask.objects.create(
+                main_task=self.main_task,
+                subtask_type='scgpt_embedding',
+                dataset_path='DS_X',
+                status='Running',
+                job_id='101',
+            )
+            return (FailingMain(), '101', prereq_row)
+
+        with mock.patch.object(services, 'cancel_job', side_effect=lambda jid: cancelled.append(jid)), \
+                mock.patch.object(services, '_chain_prerequisite', side_effect=fake_chain), \
+                mock.patch.object(services, 'MODULE_REGISTRY',
+                                  {'SubScstquery': FailingMain}):
+            with self.assertRaises(RuntimeError):
+                services.create_subtask(
+                    self.main_task, 'u', 'DS_X', 'umap_embedding', {}
+                )
+
+        # every row created in this attempt rolled back
+        self.assertEqual(SubTask.objects.filter(main_task=self.main_task).count(), 0)
+        # the already-submitted prereq SLURM job was cancelled
+        self.assertEqual(cancelled, ['101'])

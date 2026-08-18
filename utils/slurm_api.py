@@ -74,6 +74,25 @@ def submit_job(shell_script, script_arguments=None, dependency_job_ids=None):
         sbatch_command.extend(script_arguments)
     sbatch_output = subprocess.check_output(sbatch_command).decode("utf-8")
     job_id = re.search(r"Submitted batch job (\d+)", sbatch_output).group(1)
+
+
+def cancel_job(job_id):
+    """Best-effort cancellation of a SLURM job.
+
+    Used to clean up already-submitted prerequisite jobs when a later step of a
+    task chain fails (avoids orphan jobs consuming cluster resources). Never
+    raises: callers clean up regardless of whether the cancel itself succeeds.
+    """
+    try:
+        subprocess.run(
+            ["scancel", str(job_id)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+    except Exception as e:
+        print(f"scancel {job_id} error: {e}", file=sys.stderr)
     return job_id
 
 
