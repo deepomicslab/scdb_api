@@ -92,6 +92,7 @@ class HasImageCacheTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 

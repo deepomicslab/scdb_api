@@ -9,6 +9,7 @@ class DownloadSecurityTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 
@@ -112,6 +113,7 @@ class UploadValidationTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 
@@ -175,6 +177,7 @@ class LoggingConfigTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 
@@ -198,6 +201,7 @@ class CreateSubtaskAtomicityTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 
@@ -292,6 +296,7 @@ class CreateTaskAtomicityTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
         import django
 
