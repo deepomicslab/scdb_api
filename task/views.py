@@ -3,10 +3,8 @@ from task.models import tasks, SubTask, TaskStatus, SLURM_ACTIVE_STATES, PSEUDO_
 from dataset.models import Dataset
 from task.serializers import taskSerializer
 from task.services import get_module_class, create_subtask as create_subtask_service
-from rest_framework.views import APIView
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from rest_framework import viewsets
 from django.db import transaction, DatabaseError
 import os,traceback
 import time,random,json
@@ -84,11 +82,6 @@ def _sync_dependency_from_slurm(dep_subtask):
             dep_subtask.save(update_fields=['status', 'updated_at'])
     except Exception:
         pass
-
-class taskViewSet(viewsets.ModelViewSet):
-    queryset = tasks.objects.order_by('id')
-    serializer_class = taskSerializer
-
 
 @api_view(['GET'])
 def viewtask(request):
@@ -234,28 +227,15 @@ def taskdetailview(request):
     taskid = request.query_params.dict().get('taskid', '')
     if not taskid:
         return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
-    taskobject = tasks.objects.filter(id=taskid)
+    userid = request.query_params.dict().get('userid', '')
+    taskobject = tasks.objects.filter(id=taskid, user=userid)
     if not taskobject.exists():
-        return Response({'status': 'error', 'message': 'Task not found'}, status=404)
+        # Uniform 403 for missing / not-owned: do not reveal whether a task exists
+        return Response({'status': 'error', 'message': 'Access denied'}, status=403)
     serializer = taskSerializer(taskobject, many=True)
     taskdata=serializer.data[0]
     # No longer expose userpath / inputpath / outputpath (they contain server workspace paths)
     return Response({'results': taskdata})
-
-@api_view(['GET'])
-def getoutputfile(request, path):
-    base_dir = os.path.realpath(local_settings.USERTASKPATH)
-    file_path = os.path.realpath(os.path.join(base_dir, path))
-    if not file_path.startswith(base_dir + os.sep) and file_path != base_dir:
-        return Response({'status': 'error', 'message': 'Access denied'}, status=403)
-    if not os.path.isfile(file_path):
-        return Response({'status': 'error', 'message': 'File not found'}, status=404)
-    file = open(file_path, 'rb')
-    response = FileResponse(file)
-    filename = file.name.split('/')[-1]
-    response['Content-Disposition'] = "attachment; filename="+filename
-    response['Content-Type'] = 'text/plain'
-    return response
 
 
 @api_view(['GET'])
@@ -277,10 +257,12 @@ def taskresultview(request):
         module = Scstquery.__new__(Scstquery)
         res = module.gettestresult(query_params)
         return Response(res)
+    userid = query_params.get('userid', '')
     try:
-        taskobject = tasks.objects.get(id=taskid)
+        taskobject = tasks.objects.get(id=taskid, user=userid)
     except tasks.DoesNotExist:
-        return Response({'status': 'error', 'message': 'Task not found'}, status=404)
+        # Uniform 403 for missing / not-owned: do not reveal whether a task exists
+        return Response({'status': 'error', 'message': 'Access denied'}, status=403)
 
     module = None
     jsonpath = local_settings.USERTASKPATH + taskobject.userpath + '/taskdetail.json'
@@ -554,12 +536,23 @@ def create_subtask(request):
 def subtask_status_update(request):
     """
     Fetch and update a subtask's live status on demand (does not depend on the PKL file).
-    Parameters: subtaskid
+    Parameters: subtaskid, userid
     """
     subtaskid = request.query_params.get('subtaskid')
+    userid = request.query_params.get('userid', '')
 
     if not subtaskid:
         return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
+
+    # Ownership pre-check before entering the row-lock: ownership cannot change
+    # (tasks.user is immutable), so an unlocked check is safe. Uniform 403 for
+    # missing / not-owned: do not reveal whether a subtask exists.
+    try:
+        owner = SubTask.objects.select_related('main_task').get(id=subtaskid).main_task.user
+    except SubTask.DoesNotExist:
+        return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
+    if owner != userid:
+        return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
 
     try:
         with transaction.atomic():
@@ -748,10 +741,13 @@ def subtask_log(request):
     subtaskid = request.query_params.get('subtaskid')
     if not subtaskid:
         return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
+    userid = request.query_params.get('userid', '')
     try:
-        subtask = SubTask.objects.get(id=subtaskid)
+        subtask = SubTask.objects.select_related('main_task').get(id=subtaskid)
     except SubTask.DoesNotExist:
-        return Response({'status': 'Failed', 'message': f'SubTask {subtaskid} not found.'}, status=404)
+        return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
+    if subtask.main_task.user != userid:
+        return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
 
     job_id = subtask.job_id
     subtask_type = subtask.subtask_type

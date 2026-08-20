@@ -352,3 +352,161 @@ class CreateTaskAtomicityTests(TestCase):
         # the task directory is kept on disk for later inspection
         leftovers = [p for p in os.listdir(tmp_workspace) if p != 'input.h5ad']
         self.assertEqual(len(leftovers), 1)
+
+
+class TaskOwnershipTests(TestCase):
+    """Task endpoints must verify tasks.user == userid (anonymous platform identity).
+
+    Uniform 403 for missing / not-owned so the API never reveals whether a task
+    or subtask exists. testmode=true is exempt (demo data, no task lookup).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from task.models import tasks as task_model
+        from task.models import SubTask, TaskStatus
+
+        self.owner = 'owner_abc'
+        self.intruder = 'intruder_xyz'
+        self.task = task_model.objects.create(
+            name='own', user=self.owner, userpath='own123_0001',
+            task_type='module', status='Completed', modulelist='Scstquery',
+        )
+        self.subtask = SubTask.objects.create(
+            main_task=self.task,
+            subtask_type='cellchat',
+            dataset_path='ds_x',
+            status=TaskStatus.COMPLETED,
+            job_id='1234567',
+        )
+
+    def tearDown(self):
+        from task.models import tasks as task_model
+
+        task_model.objects.filter(id=self.task.id).delete()
+
+    def _client(self):
+        from django.test import Client
+
+        return Client()
+
+    # --- taskdetailview ---
+
+    def test_detail_missing_userid_rejected(self):
+        resp = self._client().get('/tasks/taskdetailview/', {'taskid': self.task.id})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_detail_wrong_userid_rejected(self):
+        resp = self._client().get('/tasks/taskdetailview/', {
+            'taskid': self.task.id, 'userid': self.intruder,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_detail_unknown_task_uniform_403(self):
+        resp = self._client().get('/tasks/taskdetailview/', {
+            'taskid': 999999, 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_detail_correct_userid_allowed(self):
+        resp = self._client().get('/tasks/taskdetailview/', {
+            'taskid': self.task.id, 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['results']['user'], self.owner)
+
+    # --- taskresultview ---
+
+    def test_result_missing_userid_rejected(self):
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': self.task.id, 'resulttype': 'metadata',
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_result_wrong_userid_rejected(self):
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': self.task.id, 'resulttype': 'metadata', 'userid': self.intruder,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_result_correct_userid_passes_gate(self):
+        # Ownership gate passed: proceeds to load task files, which do not exist
+        # in a test env -> "Task metadata not found" 404 (NOT 403).
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': self.task.id, 'resulttype': 'metadata', 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json().get('status'), 'error')
+
+    def test_result_testmode_exempt_from_ownership(self):
+        # testmode=true must work without a userid (demo data, no task lookup).
+        from unittest import mock
+
+        with mock.patch('utils.analysis.Scstquery.gettestresult', return_value={'status': 'success'}):
+            resp = self._client().get('/tasks/taskresultview/', {
+                'taskid': '72', 'resulttype': 'metadata', 'testmode': 'true',
+            })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json().get('status'), 'success')
+
+    # --- subtask/status ---
+
+    def test_subtask_status_missing_userid_rejected(self):
+        resp = self._client().get('/tasks/subtask/status/', {'subtaskid': self.subtask.id})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_subtask_status_wrong_userid_rejected(self):
+        resp = self._client().get('/tasks/subtask/status/', {
+            'subtaskid': self.subtask.id, 'userid': self.intruder,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_subtask_status_unknown_subtask_uniform_403(self):
+        resp = self._client().get('/tasks/subtask/status/', {
+            'subtaskid': 999999, 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_subtask_status_correct_userid_terminal(self):
+        # Completed is a terminal state -> returns immediately, no SLURM calls.
+        resp = self._client().get('/tasks/subtask/status/', {
+            'subtaskid': self.subtask.id, 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json().get('current_status'), 'Completed')
+
+    # --- subtask/log ---
+
+    def test_subtask_log_missing_userid_rejected(self):
+        resp = self._client().get('/tasks/subtask/log/', {'subtaskid': self.subtask.id})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_subtask_log_wrong_userid_rejected(self):
+        resp = self._client().get('/tasks/subtask/log/', {
+            'subtaskid': self.subtask.id, 'userid': self.intruder,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_subtask_log_correct_userid_passes_gate(self):
+        # Gate passed: real job_id but no SLURM log path mapping in test -> 400.
+        resp = self._client().get('/tasks/subtask/log/', {
+            'subtaskid': self.subtask.id, 'userid': self.owner,
+        })
+        self.assertIn(resp.status_code, (400, 404))
+
+    # --- removed legacy endpoints ---
+
+    def test_getoutputfile_route_removed(self):
+        resp = self._client().get('/tasks/getoutputfile/foo/bar.csv')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_taskviewset_route_removed(self):
+        resp = self._client().get('/task/')
+        self.assertEqual(resp.status_code, 404)

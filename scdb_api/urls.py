@@ -15,27 +15,18 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
-from task.views import taskViewSet
-from rest_framework import routers
+from django.urls import path, include
 import task.views
 import dataset.views
-from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
 
-router = routers.DefaultRouter()
-router.register('task', taskViewSet)
-
 
 urlpatterns = [
-    path('', include(router.urls)),
     path('api/', include('rest_framework.urls')),
     path('tasks/detail/', task.views.viewtask),
     path('tasks/list/', task.views.viewtasklist),
     path('tasks/createtask/', task.views.createtask),
-    #getoutputfile
-    path('tasks/getoutputfile/<path:path>/', task.views.getoutputfile),
     #taskdetailview
     path('tasks/taskdetailview/', task.views.taskdetailview),
     #taskresultview
