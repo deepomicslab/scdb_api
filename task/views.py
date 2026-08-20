@@ -417,7 +417,13 @@ def getImg(request):
                 pass
 
         if not ds:
-            return Response({'message': "No image for this dataset."}, status=404)
+            # image_id does not match any Dataset (dataset_id nor title) -> true error, not NO_IMAGE
+            logger.warning('[getImg] invalid image_id=%s', image_id)
+            return Response(
+                {'message': 'No image for this dataset.', 'code': 'INVALID_IMAGE_ID'},
+                status=404,
+                headers={'X-Image-Status': 'error', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+            )
 
         # 3 resolution tiers (the spec table is the single source of truth):
         #   thumbnail : 400x400 JPEG q75  (~13KB)  - card thumbnail
@@ -448,7 +454,12 @@ def getImg(request):
                 from PIL import Image
                 with h5py.File(ds.file_path, "r") as f:
                     if "uns/spatial" not in f:
-                        return Response({'message': "No image for this dataset."}, status=404)
+                        logger.info('[expected_no_image] getImg image_id=%s dataset_id=%s resolution=%s reason=no_spatial', image_id, ds.dataset_id, key)
+                        return Response(
+                            {'message': 'No image for this dataset.', 'code': 'NO_IMAGE'},
+                            status=404,
+                            headers={'X-Image-Status': 'expected_no_image', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+                        )
                     for lib in f["uns/spatial"].keys():
                         for img_key in ("hires", "lowres"):
                             img_full = f"uns/spatial/{lib}/images/{img_key}"
@@ -464,13 +475,34 @@ def getImg(request):
                                         image_dir=f'st/{ds.dataset_id}'
                                     )
                                 return _img_file_response(cache_path, content_type)
+            except OSError as e:
+                logger.warning('[getImg] FS error extracting image for %s: %s', image_id, e)
+                return Response(
+                    {'message': 'No image for this dataset.', 'code': 'FS_ERROR'},
+                    status=404,
+                    headers={'X-Image-Status': 'error', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+                )
             except Exception as e:
                 logger.warning('[getImg] error extracting image for %s: %s', image_id, e)
-            return Response({'message': "No image for this dataset."}, status=404)
+                return Response(
+                    {'message': 'No image for this dataset.', 'code': 'READ_ERROR'},
+                    status=404,
+                    headers={'X-Image-Status': 'error', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+                )
+            logger.info('[expected_no_image] getImg image_id=%s dataset_id=%s resolution=%s reason=no_image_after_exhaustion', image_id, ds.dataset_id, key)
+            return Response(
+                {'message': 'No image for this dataset.', 'code': 'NO_IMAGE'},
+                status=404,
+                headers={'X-Image-Status': 'expected_no_image', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+            )
 
         return _img_file_response(cache_path, content_type)
     else:
-        return Response({'message': f"No such analysis_type {image_analysis_type}"}, status=400)
+        return Response(
+            {'message': f'No such analysis_type {image_analysis_type}', 'code': 'INVALID_ANALYSIS_TYPE'},
+            status=400,
+            headers={'X-Image-Status': 'error', 'Access-Control-Expose-Headers': 'X-Image-Status'},
+        )
     
 @api_view(['POST'])
 def create_subtask(request):
