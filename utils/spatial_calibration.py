@@ -139,11 +139,29 @@ def extract_spatial_calibration(file_path):
     return scalef, spot
 
 
+# mtime-aware cache for JPEG header dimensions: read_spatial_calibration is
+# called on every scatter/cellchat/spider request and opens two JPEG headers
+# on /data3 network storage each time. Bounded by construction (two files per
+# dataset, ~450 keys for the current catalog).
+_jpeg_dim_cache = {}
+
+
 def _jpeg_dimensions(path):
-    """Read the JPEG header dimensions (without decoding pixels); returns (None, None) on failure."""
+    """Read the JPEG header dimensions (without decoding pixels); returns (None, None) on failure.
+
+    Cached by (mtime, size): a rebuilt image (new resolution constants) gets
+    a new stat signature and invalidates itself automatically.
+    """
     try:
+        st = os.stat(path)
+        sig = (st.st_mtime_ns, st.st_size)
+        cached = _jpeg_dim_cache.get(path)
+        if cached and cached[0] == sig:
+            return cached[1]
         with Image.open(path) as img:
-            return img.width, img.height
+            dims = (img.width, img.height)
+        _jpeg_dim_cache[path] = (sig, dims)
+        return dims
     except Exception:
         return None, None
 
