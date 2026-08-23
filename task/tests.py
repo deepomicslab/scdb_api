@@ -638,7 +638,10 @@ class ScheduledJobIdPreservationTests(TestCase):
         from django.core.management import call_command
         from task.management.commands import scheduled as scheduled_mod
 
+        # _append_change_log writes to the real server-side update.txt; keep the
+        # test from polluting it.
         with mock.patch.object(scheduled_mod.local_settings, 'USERTASKPATH', self._tmp + '/'), \
+                mock.patch.object(scheduled_mod.Command, '_append_change_log', lambda self, msg: None), \
                 mock.patch.object(scheduled_mod, 'slurm_get_job_status', return_value=slurm_status):
             call_command('scheduled', stdout=StringIO())
 
