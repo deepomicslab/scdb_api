@@ -1,0 +1,29 @@
+# Minimal dependency set to run the backend test suite in CI:
+#   python manage.py test task dataset
+#
+# The full requirements.txt is a conda-env freeze (rpy2, tensorflow, CUDA
+# wheels, local file:/// paths) that cannot be pip-installed on a clean
+# runner. Only the import graph actually needed by the test suite is
+# pinned here, at the same versions as production where possible.
+Django==4.2.23
+djangorestframework==3.16.0
+django-filter==23.2
+django-extensions==3.2.3
+python-dotenv==1.2.1
+psycopg2-binary==2.9.9
+h5py==3.8.0
+numpy==1.21.6
+pandas==1.5.3
+scipy==1.10.1
+scikit-learn==1.2.2
+anndata==0.10.3
+scanpy==1.9.6
+# scanpy dependency chain, pinned to production versions so pip does not
+# resolve a numba that rejects numpy 1.21
+numba==0.57.0
+umap-learn==0.5.4
+pynndescent==0.5.10
+matplotlib==3.7.1
+seaborn==0.12.2
+statsmodels==0.14.1
+Pillow==11.3.0

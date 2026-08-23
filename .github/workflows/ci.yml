@@ -1,0 +1,47 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: scdb_platform_dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # settings.py reads these via os.environ (load_dotenv does not override
+      # pre-set variables, so no .env file is needed here).
+      DJANGO_SECRET_KEY: ci-only-secret-key
+      DB_NAME: scdb_platform_dev
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DJANGO_DEBUG: 'False'
+      ALLOWED_HOSTS: localhost,127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: pip
+      - name: Install minimal test dependencies
+        run: pip install -r requirements-ci.txt
+      - name: Prepare settings_local from example
+        run: cp settings_local.example settings_local.py
+      - name: Run tests
+        run: python manage.py test task dataset
