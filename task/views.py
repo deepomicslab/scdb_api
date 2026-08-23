@@ -85,7 +85,9 @@ def _sync_dependency_from_slurm(dep_subtask):
 
 @api_view(['GET'])
 def viewtask(request):
-    userid = request.query_params.dict()['userid']
+    userid = request.query_params.get('userid', '')
+    if not userid:
+        return Response({'status': 'error', 'message': 'Missing userid'}, status=400)
     taskslist = tasks.objects.filter(user=userid)
     serializer = taskSerializer(taskslist, many=True)
     return Response({'results': serializer.data})
@@ -104,6 +106,11 @@ def createtask(request):
     - parameters
     """
     # create user task folder and save the file
+    # Required fields are checked up front so a malformed request can never
+    # create (and orphan) a task directory.
+    for field in ('taskname', 'userid', 'tasktype', 'modulename', 'parameters'):
+        if not request.data.get(field):
+            return Response({'status': 'Failed', 'message': f'Missing {field}'}, status=400)
     usertask_dir = str(int(time.time()))+'_' + str(random.randint(1000, 9999))
     userpath = local_settings.USERTASKPATH+usertask_dir
     uploadfilepath = userpath + '/upload/'
@@ -155,10 +162,14 @@ def createtask(request):
     # shutil.copy("/home/platform/project/scdb_platform/scdb_api/workspace/user_data/1745249986_9226/upload/input.h5ad", uploadfilepath+'input.h5ad')
 
     # get parameters from request
-    parameters_string=request.data['parameters']
+    parameters_string = request.data['parameters']
     try:
         parameters_dict = json.loads(parameters_string)
     except (json.JSONDecodeError, TypeError) as e:
+        # the upload already passed validation; drop the task dir so invalid
+        # parameters do not leave an orphaned copy behind
+        import shutil
+        shutil.rmtree(userpath, ignore_errors=True)
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
 
     # Track SLURM job submitted during module processing so we can scancel it if a
@@ -217,7 +228,9 @@ def createtask(request):
 
 @api_view(['GET'])
 def viewtasklist(request):
-    userid = request.query_params.dict()['userid']
+    userid = request.query_params.get('userid', '')
+    if not userid:
+        return Response({'status': 'error', 'message': 'Missing userid'}, status=400)
     taskslist = tasks.objects.filter(user=userid)
     serializer = taskSerializer(taskslist, many=True)
     return Response({'results': serializer.data})
@@ -227,6 +240,10 @@ def taskdetailview(request):
     taskid = request.query_params.dict().get('taskid', '')
     if not taskid:
         return Response({'status': 'error', 'message': 'Missing taskid'}, status=400)
+    try:
+        taskid = int(taskid)
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid taskid'}, status=400)
     userid = request.query_params.dict().get('userid', '')
     taskobject = tasks.objects.filter(id=taskid, user=userid)
     if not taskobject.exists():
@@ -258,6 +275,10 @@ def taskresultview(request):
         res = module.gettestresult(query_params)
         return Response(res)
     userid = query_params.get('userid', '')
+    try:
+        taskid = int(taskid)
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid taskid'}, status=400)
     try:
         taskobject = tasks.objects.get(id=taskid, user=userid)
     except tasks.DoesNotExist:
@@ -509,9 +530,15 @@ def create_subtask(request):
         return Response({'status': 'Failed', 'message': 'Missing taskid, userid, dataset_id or subtasktype'}, status=400)
 
     try:
+        taskid = int(taskid)
+    except (TypeError, ValueError):
+        return Response({'status': 'Failed', 'message': 'Invalid taskid'}, status=400)
+
+    try:
         main_task = tasks.objects.get(id=taskid, user=userid)
     except tasks.DoesNotExist:
-        return Response({'status': 'Failed', 'message': 'Task not found'}, status=404)
+        # Uniform 403 for unknown / not-owned: do not reveal whether a task exists
+        return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
 
     parameters_string = request.data.get('parameters')
     if not parameters_string:
@@ -543,6 +570,10 @@ def subtask_status_update(request):
 
     if not subtaskid:
         return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
+    try:
+        subtaskid = int(subtaskid)
+    except (TypeError, ValueError):
+        return Response({'status': 'Failed', 'message': 'Invalid subtaskid'}, status=400)
 
     # Ownership pre-check before entering the row-lock: ownership cannot change
     # (tasks.user is immutable), so an unlocked check is safe. Uniform 403 for
@@ -741,6 +772,10 @@ def subtask_log(request):
     subtaskid = request.query_params.get('subtaskid')
     if not subtaskid:
         return Response({'status': 'Failed', 'message': 'Missing subtaskid parameter.'}, status=400)
+    try:
+        subtaskid = int(subtaskid)
+    except (TypeError, ValueError):
+        return Response({'status': 'Failed', 'message': 'Invalid subtaskid'}, status=400)
     userid = request.query_params.get('userid', '')
     try:
         subtask = SubTask.objects.select_related('main_task').get(id=subtaskid)

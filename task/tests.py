@@ -749,3 +749,133 @@ class ScqueryDownloadSecurityTests(TestCase):
     def test_empty_filename_rejected(self):
         res = self._download('')
         self.assertEqual(res.get('status'), 'fail')
+
+
+class ParameterValidationTests(TestCase):
+    """Missing / malformed params must return 400 (or uniform 403 for unknown
+    ids), never an unhandled-exception 500."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from task.models import SubTask, TaskStatus, tasks as task_model
+
+        self.owner = 'owner_val'
+        self.task = task_model.objects.create(
+            name='val', user=self.owner, userpath='val123_0001',
+            task_type='module', status='Completed', modulelist='Scstquery',
+        )
+        self.subtask = SubTask.objects.create(
+            main_task=self.task, subtask_type='cellchat',
+            dataset_path='ds_x', status=TaskStatus.COMPLETED, job_id='1234567',
+        )
+        self._task_model = task_model
+
+    def tearDown(self):
+        self._task_model.objects.filter(id=self.task.id).delete()
+
+    def _client(self):
+        from django.test import Client
+
+        return Client()
+
+    def test_task_list_missing_userid_400(self):
+        for path in ('/tasks/list/', '/tasks/detail/'):
+            resp = self._client().get(path)
+            self.assertEqual(resp.status_code, 400, path)
+
+    def test_taskdetail_non_integer_taskid_400(self):
+        resp = self._client().get('/tasks/taskdetailview/', {
+            'taskid': 'abc', 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 400)
+
+    def test_taskresult_non_integer_taskid_400(self):
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': 'abc', 'userid': self.owner, 'resulttype': 'metadata',
+        })
+        self.assertEqual(resp.status_code, 400)
+
+    def test_subtask_status_non_integer_id_400(self):
+        resp = self._client().get('/tasks/subtask/status/', {
+            'subtaskid': 'abc', 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 400)
+
+    def test_subtask_log_non_integer_id_400(self):
+        resp = self._client().get('/tasks/subtask/log/', {
+            'subtaskid': 'abc', 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_subtask_unknown_task_uniform_403(self):
+        resp = self._client().post('/tasks/createsubtask/', {
+            'taskid': 999999, 'userid': self.owner,
+            'dataset_id': 'DS_X', 'subtasktype': 'cellchat',
+            'parameters': '{}',
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_create_subtask_non_integer_taskid_400(self):
+        resp = self._client().post('/tasks/createsubtask/', {
+            'taskid': 'abc', 'userid': self.owner,
+            'dataset_id': 'DS_X', 'subtasktype': 'cellchat',
+            'parameters': '{}',
+        })
+        self.assertEqual(resp.status_code, 400)
+
+    def test_createtask_missing_field_400_and_no_orphan_dir(self):
+        import tempfile
+        from unittest import mock
+
+        from django.test import Client
+        import task.views as views
+
+        tmp_workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+
+        c = Client()
+        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
+            # everything except parameters -> rejected before any directory exists
+            resp = c.post('/tasks/createtask/', {
+                'taskname': 't', 'userid': 'u',
+                'tasktype': 'module', 'modulename': 'Scstquery',
+            })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(os.listdir(tmp_workspace), [])
+
+    def test_createtask_invalid_parameters_json_400_cleans_dir(self):
+        import tempfile
+        from unittest import mock
+
+        from django.test import Client
+        import task.views as views
+
+        tmp_workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+
+        upload_path = os.path.join(tmp_workspace, 'input.h5ad')
+        import h5py
+        with h5py.File(upload_path, 'w') as hf:
+            for k in ('X', 'obs', 'var'):
+                hf.create_dataset(k, data=[1, 2, 3])
+
+        c = Client()
+        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
+            with open(upload_path, 'rb') as f:
+                resp = c.post('/tasks/createtask/', {
+                    'submitfile': f,
+                    'parameters': '{not valid json',
+                    'taskname': 't', 'userid': 'u',
+                    'tasktype': 'module', 'modulename': 'Scstquery',
+                })
+        self.assertEqual(resp.status_code, 400)
+        # the uploaded task dir must not be left behind
+        leftovers = [p for p in os.listdir(tmp_workspace) if p != 'input.h5ad']
+        self.assertEqual(leftovers, [])
