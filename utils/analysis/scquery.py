@@ -3,6 +3,7 @@ import pandas as pd
 from scdb_api import settings_local as local_settings
 from utils.page import paginate_dataframe
 from utils.fileprocess import get_gene_list, get_cluster_list
+from utils.analysis.scstquery_mixins.common import read_task_file_b64
 from .base import Module
 
 
@@ -78,31 +79,13 @@ class Scquery(Module):
         return res
     
     def download(self, filename):
-        #TODO
-        if filename.endswith('.h5ad'):
-            # filepath = os.path.join(self.path, 'result/sc_query_output/h5ad', filename)
-            filepath = os.path.join(self.path, 'result/sc_query/annotation_h5ad', filename)
-        elif filename.endswith('.txt'):
-            filepath = os.path.join(self.path, 'result/meta', filename)
-        elif filename.endswith('.csv'):
-            filepath = os.path.join(self.path, 'result/sc_marker', filename)
-        print(filepath)
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'rb') as f:
-                    file_content = f.read()
-                    import base64
-                    file_content_base64 = base64.b64encode(file_content).decode('utf-8')
-                    res = {'filename': filename, 'file_content': file_content_base64, 'status': 'success', 'message': "read file successfully."}
-                    
-            except Exception as e:
-                print(f"Error reading file: {e}")
-                res = {'status': 'fail', 'message': "File cannot be read."}
-        else:
-            print(f"{filename} does not exist in {filepath}")
-            res = {'status': 'fail', 'message': "File is not existed."}
-        
-        return res
+        # Legacy contract is bare filenames only (see getdownloadfilelist), so any
+        # name with a separator is rejected outright. Everything else - absolute
+        # paths, ".." traversal, symlink escapes, server-internal metadata - is
+        # guarded by the shared validator also used by CommonMixin.download.
+        if filename and '/' in filename:
+            return {'status': 'fail', 'message': 'Invalid filename.'}
+        return read_task_file_b64(self.path, filename)
     
     def getdownloadfilelist(self, flag):
         filelist = {}

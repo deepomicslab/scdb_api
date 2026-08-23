@@ -32,6 +32,63 @@ _DOWNLOAD_EXCLUDED = {
 }
 
 
+def read_task_file_b64(task_root, filename):
+    """Validated task-workspace file read, shared by CommonMixin.download and the
+    legacy Scquery.download (single security implementation).
+
+    The download boundary is the whole task directory (task_root): any relative
+    path inside it can be fetched. Bare filenames (no separator) keep the old
+    filelist behavior and are looked up in _DOWNLOAD_BARE_DIRS.
+
+    Safety: rejects absolute paths, ".." traversal, and symlinks that resolve
+    outside the task root; server-internal metadata files are excluded.
+    Returns the legacy base64-JSON contract.
+    """
+    # 1. Basic sanity: non-empty, not absolute, no ".." segments, no backslashes
+    if not filename or os.path.isabs(filename) or '\\' in filename:
+        return {'status': 'fail', 'message': 'Invalid filename.'}
+    parts = filename.split('/')
+    if any(p in ('', '.', '..') for p in parts):
+        return {'status': 'fail', 'message': 'Invalid filename.'}
+    # never expose server-internal metadata
+    if parts[-1] in _DOWNLOAD_EXCLUDED:
+        return {'status': 'fail', 'message': 'Invalid filename.'}
+
+    task_root = os.path.realpath(task_root)
+
+    # 2. Resolve candidates: bare names search the legacy dirs, paths with separators
+    #    resolve directly against the task root.
+    if '/' in filename:
+        candidates = [os.path.join(task_root, filename)]
+    else:
+        candidates = [os.path.join(task_root, d, filename) for d in _DOWNLOAD_BARE_DIRS]
+
+    for candidate in candidates:
+        real = os.path.realpath(candidate)
+        # containment guard: final path must stay inside the task root (blocks symlink escape)
+        if os.path.commonpath([task_root, real]) != task_root:
+            continue
+        if not os.path.isfile(real):
+            continue
+        try:
+            with open(real, 'rb') as f:
+                file_content = f.read()
+                import base64
+                file_content_base64 = base64.b64encode(file_content).decode('utf-8')
+                return {
+                    'filename': filename,
+                    'file_content': file_content_base64,
+                    'status': 'success',
+                    'message': "read file successfully.",
+                }
+        except Exception as e:
+            logger.warning('Error reading file %s: %s', filename, e)
+            return {'status': 'fail', 'message': "File cannot be read."}
+
+    logger.info('File %s does not exist in the task workspace', filename)
+    return {'status': 'fail', 'message': "File is not existed."}
+
+
 class CommonMixin:
     """Common result methods for Scstquery: metadata, datasets, downloads, images."""
 
@@ -199,57 +256,10 @@ class CommonMixin:
     def download(self, filename):
         """Read a file from the task workspace and return it base64-encoded (legacy JSON contract).
 
-        The download boundary is the whole task directory (self.path): any relative path
-        inside it can be fetched, so subtask results under dataset_{uuid}/subtask_*/result/
-        are supported without extra whitelisting. Bare filenames (no separator) keep the old
-        filelist behavior and are looked up in _DOWNLOAD_BARE_DIRS.
-
-        Safety: rejects absolute paths, ".." traversal, and symlinks that resolve outside
-        the task root; server-internal metadata files are excluded.
+        Validation and reading live in read_task_file_b64, shared with the legacy
+        Scquery.download so the security rules cannot drift apart.
         """
-        # 1. Basic sanity: non-empty, not absolute, no ".." segments, no backslashes
-        if not filename or os.path.isabs(filename) or '\\' in filename:
-            return {'status': 'fail', 'message': 'Invalid filename.'}
-        parts = filename.split('/')
-        if any(p in ('', '.', '..') for p in parts):
-            return {'status': 'fail', 'message': 'Invalid filename.'}
-        # never expose server-internal metadata
-        if parts[-1] in _DOWNLOAD_EXCLUDED:
-            return {'status': 'fail', 'message': 'Invalid filename.'}
-
-        task_root = os.path.realpath(self.path)
-
-        # 2. Resolve candidates: bare names search the legacy dirs, paths with separators
-        #    resolve directly against the task root.
-        if '/' in filename:
-            candidates = [os.path.join(task_root, filename)]
-        else:
-            candidates = [os.path.join(task_root, d, filename) for d in _DOWNLOAD_BARE_DIRS]
-
-        for candidate in candidates:
-            real = os.path.realpath(candidate)
-            # containment guard: final path must stay inside the task root (blocks symlink escape)
-            if os.path.commonpath([task_root, real]) != task_root:
-                continue
-            if not os.path.isfile(real):
-                continue
-            try:
-                with open(real, 'rb') as f:
-                    file_content = f.read()
-                    import base64
-                    file_content_base64 = base64.b64encode(file_content).decode('utf-8')
-                    return {
-                        'filename': filename,
-                        'file_content': file_content_base64,
-                        'status': 'success',
-                        'message': "read file successfully.",
-                    }
-            except Exception as e:
-                logger.warning('Error reading file %s: %s', filename, e)
-                return {'status': 'fail', 'message': "File cannot be read."}
-
-        logger.info('File %s does not exist in the task workspace', filename)
-        return {'status': 'fail', 'message': "File is not existed."}
+        return read_task_file_b64(self.path, filename)
     
     def getdownloadfilelist(self, flag):
         filelist = {}

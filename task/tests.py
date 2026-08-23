@@ -510,3 +510,239 @@ class TaskOwnershipTests(TestCase):
     def test_taskviewset_route_removed(self):
         resp = self._client().get('/task/')
         self.assertEqual(resp.status_code, 404)
+
+
+class SlurmSubmitJobTests(TestCase):
+    """submit_job must return the parsed job id.
+
+    Regression: the original `return job_id` line was orphaned into cancel_job's
+    body, so submit_job returned None -> taskdetail.json got job_id null -> the
+    scheduled sync treated every fresh task as metadata-less and deleted it."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+        from utils.slurm_api import submit_job
+
+        cls.submit_job = staticmethod(submit_job)
+
+    def test_submit_job_returns_parsed_job_id(self):
+        from unittest import mock
+
+        with mock.patch('utils.slurm_api.subprocess.check_output',
+                        return_value=b'Submitted batch job 12345\n'):
+            job_id = self.submit_job('/fake/run.sh', script_arguments=['a', 'b'])
+        self.assertEqual(job_id, '12345')
+
+    def test_submit_job_with_dependencies_builds_afterok_chain(self):
+        from unittest import mock
+
+        commands = []
+
+        def fake_check_output(cmd, **kwargs):
+            commands.append(cmd)
+            return b'Submitted batch job 777\n'
+
+        with mock.patch('utils.slurm_api.subprocess.check_output',
+                        side_effect=fake_check_output):
+            job_id = self.submit_job('/fake/run.sh', dependency_job_ids=[11, 22])
+        self.assertEqual(job_id, '777')
+        self.assertIn('--dependency=afterok:11:22', commands[0])
+        self.assertIn('--kill-on-invalid-dep=yes', commands[0])
+
+    def test_submit_job_sbatch_failure_propagates(self):
+        import subprocess as subprocess_mod
+        from unittest import mock
+
+        with mock.patch('utils.slurm_api.subprocess.check_output',
+                        side_effect=subprocess_mod.CalledProcessError(1, 'sbatch')):
+            with self.assertRaises(subprocess_mod.CalledProcessError):
+                self.submit_job('/fake/run.sh')
+
+
+class ModuleProcessStoresJobIdTests(TestCase):
+    """Module.process must persist the id returned by submit_job (P0 chain)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+        from task.models import TaskStatus
+        from utils.analysis.base import Module
+
+        cls.Module = Module
+        cls.TaskStatus = TaskStatus
+
+    def test_process_stores_returned_job_id(self):
+        from unittest import mock
+
+        mod = self.Module('m', '/tmp/nonexistent-task')
+        mod.shell_script = '/fake/run.sh'
+        mod.script_arguments = None
+        with mock.patch('utils.slurm_api.submit_job', return_value='555') as submit:
+            returned = mod.process()
+        submit.assert_called_once()
+        self.assertEqual(returned, '555')
+        self.assertEqual(mod.job_id, '555')
+        self.assertEqual(mod.status, self.TaskStatus.RUNNING)
+
+
+class ScheduledJobIdPreservationTests(TestCase):
+    """Scheduled sync: a Running task whose taskdetail.json carries a real job_id
+    must survive the sweep; only metadata-less tasks are cleaned up."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from task.models import tasks as task_model
+
+        self._tmp = tempfile.mkdtemp()
+        self.task_row = task_model.objects.create(
+            name='sched', user='u', userpath='sched_0001',
+            task_type='module', status='Running', modulelist='Scstquery',
+        )
+        self._task_model = task_model
+
+    def tearDown(self):
+        self._task_model.objects.filter(id=self.task_row.id).delete()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _write_taskdir(self, userpath, job_id):
+        import json
+
+        task_dir = os.path.join(self._tmp, userpath)
+        os.makedirs(task_dir, exist_ok=True)
+        detail = {'modulename': 'Scstquery', 'status': 'Running'}
+        if job_id is not None:
+            detail['job_id'] = job_id
+        with open(os.path.join(task_dir, 'taskdetail.json'), 'w') as f:
+            json.dump([detail], f)
+
+    def _run_scheduled(self, slurm_status):
+        from io import StringIO
+        from unittest import mock
+
+        from django.core.management import call_command
+        from task.management.commands import scheduled as scheduled_mod
+
+        with mock.patch.object(scheduled_mod.local_settings, 'USERTASKPATH', self._tmp + '/'), \
+                mock.patch.object(scheduled_mod, 'slurm_get_job_status', return_value=slurm_status):
+            call_command('scheduled', stdout=StringIO())
+
+    def test_task_with_real_job_id_survives_sync(self):
+        self._write_taskdir('sched_0001', '424242')
+        self._run_scheduled('RUNNING')
+        self.assertTrue(self._task_model.objects.filter(id=self.task_row.id).exists())
+        row = self._task_model.objects.get(id=self.task_row.id)
+        self.assertEqual((row.status or '').lower(), 'running')
+
+    def test_task_without_job_id_metadata_is_cleaned_up(self):
+        self._write_taskdir('sched_0001', None)
+        self._run_scheduled('RUNNING')
+        self.assertFalse(self._task_model.objects.filter(id=self.task_row.id).exists())
+
+
+class ScqueryDownloadSecurityTests(TestCase):
+    """Legacy Scquery.download: bare-name contract + the shared traversal/symlink
+    guards (the front-end entry is hidden, but backend security must not rely
+    on that)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+        from utils.analysis.scquery import Scquery
+
+        cls.Scquery = Scquery
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self.task_root = os.path.join(self._tmp, 'task')
+        # __new__ bypasses __init__ (which reads settings_local / params);
+        # download() only needs self.path.
+        self.mod = self.Scquery.__new__(self.Scquery)
+        self.mod.path = self.task_root
+        self._make_file('result/sc_marker', 'X_marker.csv', b'csv-content')
+        self._make_file('result/sc_query/annotation_h5ad', 'ann.h5ad', b'h5ad-bytes')
+        self._make_file('result/meta', 'meta.txt', b'txt-content')
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _make_file(self, rel_dir, name, content):
+        d = os.path.join(self.task_root, rel_dir)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name), 'wb') as f:
+            f.write(content)
+
+    def _download(self, filename):
+        return self.mod.download(filename)
+
+    def _assert_success(self, res, expect_bytes):
+        self.assertEqual(res.get('status'), 'success', res)
+        import base64
+        self.assertEqual(base64.b64decode(res['file_content']), expect_bytes)
+
+    def test_legitimate_files_still_download(self):
+        self._assert_success(self._download('X_marker.csv'), b'csv-content')
+        self._assert_success(self._download('ann.h5ad'), b'h5ad-bytes')
+        self._assert_success(self._download('meta.txt'), b'txt-content')
+
+    def test_parent_traversal_rejected(self):
+        outside = os.path.join(self._tmp, 'secret.txt')
+        with open(outside, 'wb') as f:
+            f.write(b'secret')
+        for bad in ('../secret.txt', '../../secret.txt', '..%2fsecret.txt'):
+            res = self._download(bad)
+            self.assertEqual(res.get('status'), 'fail', bad)
+
+    def test_absolute_path_rejected(self):
+        res = self._download('/tmp/secret.txt')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_subdirectory_path_rejected(self):
+        # Scquery's legacy contract is bare filenames only
+        res = self._download('result/meta/meta.txt')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_symlink_escape_rejected(self):
+        outside = os.path.join(self._tmp, 'outside.txt')
+        with open(outside, 'wb') as f:
+            f.write(b'outside')
+        os.symlink(outside, os.path.join(self.task_root, 'result', 'meta', 'escape.txt'))
+        res = self._download('escape.txt')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_internal_metadata_excluded(self):
+        self._make_file('', 'taskdetail.json', b'{}')
+        res = self._download('taskdetail.json')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_missing_file_fails_cleanly(self):
+        res = self._download('no_such.csv')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_unknown_extension_fails_without_error(self):
+        # the old implementation raised NameError (filepath never assigned)
+        res = self._download('weird.exe')
+        self.assertEqual(res.get('status'), 'fail')
+
+    def test_empty_filename_rejected(self):
+        res = self._download('')
+        self.assertEqual(res.get('status'), 'fail')
