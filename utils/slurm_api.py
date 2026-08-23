@@ -77,6 +77,7 @@ def submit_job(shell_script, script_arguments=None, dependency_job_ids=None):
         sbatch_command.extend(script_arguments)
     sbatch_output = subprocess.check_output(sbatch_command).decode("utf-8")
     job_id = re.search(r"Submitted batch job (\d+)", sbatch_output).group(1)
+    return job_id
 
 
 def cancel_job(job_id):
@@ -96,6 +97,5 @@ def cancel_job(job_id):
         )
     except Exception as e:
         logger.warning('scancel %s error: %s', job_id, e)
-    return job_id
 
 
