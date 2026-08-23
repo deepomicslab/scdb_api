@@ -42,6 +42,6 @@ jobs:
       - name: Install minimal test dependencies
         run: pip install -r requirements-ci.txt
       - name: Prepare settings_local from example
-        run: cp settings_local.example settings_local.py
+        run: cp scdb_api/settings_local.example scdb_api/settings_local.py
       - name: Run tests
         run: python manage.py test task dataset
