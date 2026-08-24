@@ -255,6 +255,28 @@ def taskdetailview(request):
     return Response({'results': taskdata})
 
 
+# Tool versions for Run Summary: hand-maintained TOOL_VERSIONS_PATH file,
+# re-read when its mtime changes (editing the file takes effect without a
+# gunicorn restart). Missing file / bad JSON -> None (UI shows "not recorded").
+_tool_versions_cache = {'mtime': None, 'data': None}
+
+
+def _load_tool_versions():
+    path = getattr(local_settings, 'TOOL_VERSIONS_PATH', '')
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        if _tool_versions_cache['mtime'] != mtime:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            _tool_versions_cache['mtime'] = mtime
+            _tool_versions_cache['data'] = data if isinstance(data, dict) else None
+        return _tool_versions_cache['data']
+    except Exception:
+        return None
+
+
 @api_view(['GET'])
 def taskresultview(request):
     """
@@ -298,10 +320,10 @@ def taskresultview(request):
             'created_at': taskobject.created_at,
             'parameters': {},
             'subtasks': [],
-            # Tool versions (cytospace/tangram/cellchat/...) are not recorded
-            # in taskdetail.json yet — surfaced as an explicit placeholder so
-            # the UI can render an honest "not recorded" instead of guessing.
-            'tool_versions': None,
+            # Tool versions come from a hand-maintained TOOL_VERSIONS_PATH
+            # file (see tool_versions.example.json); null when the file is
+            # absent so the UI can render an honest "not recorded".
+            'tool_versions': _load_tool_versions(),
         }
         try:
             jsonpath = local_settings.USERTASKPATH + taskobject.userpath + '/taskdetail.json'

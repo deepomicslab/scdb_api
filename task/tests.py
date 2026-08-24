@@ -481,6 +481,33 @@ class TaskOwnershipTests(TestCase):
         self.assertEqual(data['subtasks'][0]['subtask_type'], 'cellchat')
         self.assertEqual(data['subtasks'][0]['status'], 'Completed')
 
+    def test_runsummary_tool_versions_from_file(self):
+        # TOOL_VERSIONS_PATH present -> runSummary returns the hand-maintained
+        # version dict; the mtime cache must be reset around the call.
+        import json
+        import tempfile
+        from unittest import mock
+
+        from task import views as task_views
+
+        versions = {'cytospace': '1.1.0', 'cellchat': '2.2.0'}
+        fd, path = tempfile.mkstemp(suffix='.json')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(versions, f)
+            task_views._tool_versions_cache['mtime'] = None
+            task_views._tool_versions_cache['data'] = None
+            with mock.patch.object(task_views.local_settings, 'TOOL_VERSIONS_PATH', path):
+                resp = self._client().get('/tasks/taskresultview/', {
+                    'taskid': self.task.id, 'resulttype': 'runSummary', 'userid': self.owner,
+                })
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()['data']['tool_versions'], versions)
+        finally:
+            os.remove(path)
+            task_views._tool_versions_cache['mtime'] = None
+            task_views._tool_versions_cache['data'] = None
+
     # --- subtask/status ---
 
     def test_subtask_status_missing_userid_rejected(self):
