@@ -285,6 +285,47 @@ def taskresultview(request):
         # Uniform 403 for missing / not-owned: do not reveal whether a task exists
         return Response({'status': 'error', 'message': 'Access denied'}, status=403)
 
+    # Run Summary: reproducibility metadata (module, submitted parameters,
+    # subtask timeline). Handled at the view level, before module dispatch,
+    # because the mixin layer only receives query_params — a taskid passed
+    # that way would be spoofable; here the id is the already-authenticated
+    # taskobject.
+    if query_params.get('resulttype') == 'runSummary':
+        summary = {
+            'task_name': taskobject.name,
+            'module': taskobject.modulelist,
+            'task_type': taskobject.task_type,
+            'created_at': taskobject.created_at,
+            'parameters': {},
+            'subtasks': [],
+            # Tool versions (cytospace/tangram/cellchat/...) are not recorded
+            # in taskdetail.json yet — surfaced as an explicit placeholder so
+            # the UI can render an honest "not recorded" instead of guessing.
+            'tool_versions': None,
+        }
+        try:
+            jsonpath = local_settings.USERTASKPATH + taskobject.userpath + '/taskdetail.json'
+            with open(jsonpath, 'r') as f:
+                taskdetail = json.load(f)
+            detail = taskdetail[0] if isinstance(taskdetail, list) else taskdetail
+            summary['module'] = detail.get('modulename') or summary['module']
+            summary['parameters'] = detail.get('parameters_dict', {}) or {}
+        except Exception:
+            # taskdetail.json missing/corrupt: module info stays at DB level
+            pass
+        subs = SubTask.objects.filter(main_task_id=taskobject.id).order_by('id')
+        summary['subtasks'] = [
+            {
+                'subtask_type': s.subtask_type,
+                'status': s.status,
+                'job_id': s.job_id,
+                'created_at': s.created_at,
+                'updated_at': s.updated_at,
+            }
+            for s in subs
+        ]
+        return Response({'status': 'success', 'data': summary})
+
     module = None
     jsonpath = local_settings.USERTASKPATH + taskobject.userpath + '/taskdetail.json'
     try:

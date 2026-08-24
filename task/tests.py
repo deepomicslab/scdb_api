@@ -456,6 +456,31 @@ class TaskOwnershipTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json().get('status'), 'success')
 
+    # --- taskresultview / runSummary ---
+
+    def test_runsummary_wrong_userid_rejected(self):
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': self.task.id, 'resulttype': 'runSummary', 'userid': self.intruder,
+        })
+        self.assertEqual(resp.status_code, 403)
+
+    def test_runsummary_owner_returns_summary(self):
+        # taskdetail.json does not exist in the test env -> module falls back
+        # to the DB row; parameters stay empty; the subtask timeline comes
+        # from the SubTask rows.
+        resp = self._client().get('/tasks/taskresultview/', {
+            'taskid': self.task.id, 'resulttype': 'runSummary', 'userid': self.owner,
+        })
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body['status'], 'success')
+        data = body['data']
+        self.assertEqual(data['module'], 'Scstquery')
+        self.assertEqual(data['parameters'], {})
+        self.assertEqual(len(data['subtasks']), 1)
+        self.assertEqual(data['subtasks'][0]['subtask_type'], 'cellchat')
+        self.assertEqual(data['subtasks'][0]['status'], 'Completed')
+
     # --- subtask/status ---
 
     def test_subtask_status_missing_userid_rejected(self):
