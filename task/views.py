@@ -83,16 +83,6 @@ def _sync_dependency_from_slurm(dep_subtask):
     except Exception:
         pass
 
-@api_view(['GET'])
-def viewtask(request):
-    userid = request.query_params.get('userid', '')
-    if not userid:
-        return Response({'status': 'error', 'message': 'Missing userid'}, status=400)
-    taskslist = tasks.objects.filter(user=userid)
-    serializer = taskSerializer(taskslist, many=True)
-    return Response({'results': serializer.data})
-
-
 @api_view(['POST'])
 def createtask(request):
     """

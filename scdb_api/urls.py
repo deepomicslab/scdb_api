@@ -24,7 +24,6 @@ from django.conf import settings
 
 urlpatterns = [
     path('api/', include('rest_framework.urls')),
-    path('tasks/detail/', task.views.viewtask),
     path('tasks/list/', task.views.viewtasklist),
     path('tasks/createtask/', task.views.createtask),
     #taskdetailview

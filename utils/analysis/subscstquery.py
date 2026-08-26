@@ -417,10 +417,6 @@ class SubScstquery(Module):
         if sub_type == 'hierarchical':
             if resulttype == 'hierarchicalClusteringMarkerGenes':
                 return self.getHierarchicalClusteringMarkerGenes(query_params.get('dataset'), query_params.get('cluster'))
-        elif sub_type == 'marker_genes':
-            if resulttype == 'markerExpression':
-                # custom
-                return {'results': 'Marker gene data', 'status': 'success'}
         # Default: reuse the base class (if there is a generic one)
         else:
             expressionfile = self.path + '/result/scquery/sc_output_expression.csv'

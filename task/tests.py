@@ -838,9 +838,8 @@ class ParameterValidationTests(TestCase):
         return Client()
 
     def test_task_list_missing_userid_400(self):
-        for path in ('/tasks/list/', '/tasks/detail/'):
-            resp = self._client().get(path)
-            self.assertEqual(resp.status_code, 400, path)
+        resp = self._client().get('/tasks/list/')
+        self.assertEqual(resp.status_code, 400)
 
     def test_taskdetail_non_integer_taskid_400(self):
         resp = self._client().get('/tasks/taskdetailview/', {
