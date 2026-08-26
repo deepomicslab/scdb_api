@@ -130,3 +130,56 @@ class HasImageCacheTests(TestCase):
         self.assertFalse(dm._has_image_cached(target))
         # cached false (no second stat; we just assert it stays consistent)
         self.assertFalse(dm._has_image_cached(target))
+
+
+class CacheBoundTests(TestCase):
+    """_evict_oldest: FIFO cap keeps the module-level caches bounded under
+    arbitrary user-supplied keys, shedding the oldest entry (and its parallel
+    timestamp when one exists) before each write past capacity."""
+
+    def test_empty_cache_is_noop(self):
+        from dataset import views as dv
+
+        cache = {}
+        dv._evict_oldest(cache, 3)
+        self.assertEqual(cache, {})
+
+    def test_fifo_bound_and_order(self):
+        from dataset import views as dv
+
+        cache = {}
+
+        def put(key, value):
+            dv._evict_oldest(cache, 3)
+            cache[key] = value
+
+        put('k0', 0)
+        put('k1', 1)
+        put('k2', 2)
+        self.assertEqual(list(cache), ['k0', 'k1', 'k2'])
+        # capacity write: oldest (k0) is shed first so size stays bounded
+        put('k3', 3)
+        self.assertEqual(len(cache), 3)
+        self.assertNotIn('k0', cache)
+        self.assertEqual(list(cache), ['k1', 'k2', 'k3'])
+        # re-inserting an evicted key makes it newest again
+        put('k0', 10)
+        self.assertEqual(list(cache), ['k2', 'k3', 'k0'])
+
+    def test_paired_timestamp_dict_sheds_same_key(self):
+        from dataset import views as dv
+
+        values = {}
+        stamps = {}
+
+        def put(key, value):
+            dv._evict_oldest(values, 2, aux=stamps)
+            values[key] = value
+            stamps[key] = 123.0
+
+        put('a', 1)
+        put('b', 2)
+        put('c', 3)
+        self.assertEqual(list(values), ['b', 'c'])
+        # the aux dict must not leak entries whose value entry was evicted
+        self.assertEqual(sorted(stamps), ['b', 'c'])

@@ -15,6 +15,20 @@ from utils.logging import get_logger
 
 logger = get_logger('dataset_views')
 
+
+def _evict_oldest(cache, max_entries, aux=None):
+    """FIFO bound for the module-level caches below: dicts preserve insertion
+    order, so the first key is the oldest entry. Call before each write; the
+    read-side TTL checks stay untouched (a stale entry just stops being served).
+    `aux` receives the parallel timestamp dict, when one exists, so both halves
+    of a cache pair shed the same key."""
+    while len(cache) >= max_entries:
+        key = next(iter(cache))
+        cache.pop(key, None)
+        if aux is not None:
+            aux.pop(key, None)
+
+
 # ================================
 # 1. Global stats (Hero Stats) - very fast
 # ================================
@@ -101,6 +115,7 @@ def dataset_list(request):
 _celltype_cache = {}
 _celltype_cache_time = {}
 _CELLTYPE_CACHE_TTL = 60
+_CELLTYPE_CACHE_MAX_ENTRIES = 200
 
 
 @api_view(['GET'])
@@ -131,6 +146,7 @@ def celltype_stats(request):
         top_10.append({'name': 'Others', 'value': others_count})
         result_list = top_10
 
+    _evict_oldest(_celltype_cache, _CELLTYPE_CACHE_MAX_ENTRIES, aux=_celltype_cache_time)
     _celltype_cache[cache_key] = result_list
     _celltype_cache_time[cache_key] = now
 
@@ -164,6 +180,7 @@ def detail_info(request, dataset_id):
 # ================================
 _scatter_cache = {}
 _SCATTER_CACHE_TTL = 3600
+_SCATTER_CACHE_MAX_ENTRIES = 100
 
 
 def _scatter_first_truthy(df, cols):
@@ -291,6 +308,7 @@ def detail_scatter(request, dataset_id):
             'tissue_hires_scalef': tissue_hires_scalef,
             'spot_diameter_fullres': spot_diameter_fullres,
         }
+        _evict_oldest(_scatter_cache, _SCATTER_CACHE_MAX_ENTRIES)
         _scatter_cache[dataset_id] = (body, time.time() + _SCATTER_CACHE_TTL)
         return Response(body)
 
@@ -509,6 +527,7 @@ def dataset_gene_expression(request, dataset_id):
 # ================================
 _gene_suggest_cache = {}
 _GENE_SUGGEST_TTL = 300
+_GENE_SUGGEST_CACHE_MAX_ENTRIES = 200
 
 
 @api_view(['GET'])
@@ -571,6 +590,7 @@ def dataset_gene_suggest(request, dataset_id):
                 break
 
         body = {'status': 'success', 'symbols': symbols}
+        _evict_oldest(_gene_suggest_cache, _GENE_SUGGEST_CACHE_MAX_ENTRIES)
         _gene_suggest_cache[cache_key] = (body, time.time() + _GENE_SUGGEST_TTL)
         return Response(body)
 
