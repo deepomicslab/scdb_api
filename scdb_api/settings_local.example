@@ -9,7 +9,7 @@ SCDB_MODULE = '/home/platform/project/scdb_platform/scdb_api/workspace/module/'
 # maintained by hand and re-read when its mtime changes - no restart needed.
 TOOL_VERSIONS_PATH = '/home/platform/project/scdb_platform/scdb_api/tool_versions.json'
 SCQUERY_SCRIPT = '/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old/run.sh'
-CYTOSPACE_SCRIPT = '/data3/platform/sc_db/1218test/cytospace/run_slurm_cytospace.sh'
+CYTOSPACE_SCRIPT = '/data3/platform/sc_db/cytospace/run_slurm_cytospace.sh'
 TANGRAM_SCRIPT = '/data3/platform/sc_db/tangram/run_slurm_tangram.sh'
 ALPHATALK_SCRIPT = '/data3/platform/sc_db/AlphaTalk/run_slurm_alphatalk.sh'
 SPIDER_SCRIPT = '/data3/platform/sc_db/spider/run_slurm_spider.sh'
