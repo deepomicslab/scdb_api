@@ -27,7 +27,7 @@ ST_PRECOMPUTED_ROOT = '/data2/platform/scdb_platform/st_precomputed/'
 
 # SLURM log paths for subtask_log endpoint
 SLURM_LOG_PATHS = {
-    ('scst_mapping', 'cytospace'): '/data3/platform/sc_db/1218test/cytospace/logs/cytospace_{job_id}.out',
+    ('scst_mapping', 'cytospace'): '/data3/platform/sc_db/cytospace/logs/cytospace_{job_id}.out',
     ('scst_mapping', 'tangram'):   '/data3/platform/sc_db/tangram/logs/tangram_{job_id}.out',
     ('commot', None):              '/data3/platform/sc_db/commot/logs/commot_{job_id}.out',
     ('cellchat', None):            '/data3/platform/sc_db/cellchat/logs/cellchat_{job_id}.out',
