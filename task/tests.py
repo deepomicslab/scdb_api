@@ -722,7 +722,7 @@ class ScqueryDownloadSecurityTests(TestCase):
         import django
 
         django.setup()
-        from utils.analysis.legacy_scquery import Scquery
+        from utils.analysis.scquery import Scquery
 
         cls.Scquery = Scquery
 
