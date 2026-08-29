@@ -20,7 +20,6 @@ class Scstquery(Module, CommonMixin, HEScatterMixin, HierarchicalClusteringMixin
         super().__init__(name, path)
         inputfilepath = local_settings.USERTASKPATH + path + '/upload/input.h5ad'
         outputdir = local_settings.USERTASKPATH + path + '/result/'
-        paramk = str(params['k'])
         projectname = params['projectname']
         organs = params['organParts']
         disease = str(params.get('disease', 'all')).lower()

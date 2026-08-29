@@ -12,10 +12,10 @@ class Scquery(Module):
         super().__init__(name,path)
         inputfilepath=local_settings.USERTASKPATH +path+'/upload/input.h5ad'
         outputdir=local_settings.USERTASKPATH +path+'/result/'
-        paramk=str(params['k'])
         projectname=params['projectname']
         self.script_arguments = [inputfilepath,outputdir,projectname,'50','0.8']
-        #/home/platform/project/scdb_platform/scdb_api/workspace/module/sc_query_old
+        # module/sc_query/ is the legacy single-cell pipeline (see sc_query_old note
+        # in settings_local — SCQUERY_SCRIPT is unused; this is the live script)
         self.shell_script = local_settings.SCDB_MODULE+'sc_query/run.sh'
         
     def getmetaresult(self,page,pagesize):

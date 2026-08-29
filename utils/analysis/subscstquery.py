@@ -45,10 +45,12 @@ class SubScstquery(Module):
         outputdir = self.path + '/result/'
         projectname = params.get('projectname', 'default')
         organs = params.get('organParts', '')
-        if subtask_type == 'hierarchical':
-            self.script_arguments = [inputfilepath, outputdir, projectname, '190', '1.2', 'hierarchical', organs]
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical.sh'
-        elif subtask_type == 'annotation_mapping':
+        if subtask_type in ('hierarchical', 'marker_genes'):
+            # Legacy types whose SLURM scripts (sub_hierarchical.sh / sub_marker.sh)
+            # no longer exist in module/scst_query/ — fail fast with a clear message
+            # instead of submitting a doomed job.
+            raise ValueError(f"Legacy subtask type '{subtask_type}' is no longer supported")
+        if subtask_type == 'annotation_mapping':
             # annotation_mapping is now a routing-only subtask; actual work delegated to he_scatter
             self.script_arguments = []
             self.shell_script = None  # no SLURM job; he_scatter handles the actual work
@@ -77,9 +79,6 @@ class SubScstquery(Module):
                 dataset_path,
             ]
             self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_hierarchical_clustering.sh'
-        elif subtask_type == 'marker_genes':
-            self.script_arguments = [inputfilepath, outputdir, params.get('gene', 'default_gene'), 'marker_only']
-            self.shell_script = local_settings.SCDB_MODULE + 'scst_query/sub_marker.sh'
         elif subtask_type == "commot":
             if is_st_source:
                 input_h5ad = st_h5ad_path

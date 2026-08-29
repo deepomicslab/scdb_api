@@ -4,7 +4,6 @@ import pandas as pd
 import scanpy as sc
 from pathlib import Path
 from scdb_api import settings_local as local_settings
-from utils.page import paginate_dataframe
 from dataset.models import Dataset
 from utils.logging import get_logger
 
@@ -245,13 +244,10 @@ class CommonMixin:
         }
 
     def getmetaresult(self,page,pagesize):
-        metadatafile = self.path + f'/result/meta/test_cluster_1_meta_data_addquerycell.txt'
-        metadata = pd.read_csv(metadatafile,sep='\t', index_col=False)
-        count = metadata.shape[0]
-        metadata.rename(columns={metadata.columns[0]: 'Cell_id'}, inplace=True)
-        metadata=paginate_dataframe(metadata, page, pagesize)
-        res={'results': metadata.to_dict(orient='records'), 'count': count}
-        return res
+        # The legacy Scquery pipeline wrote result/meta/...; the Scstquery main
+        # task never produces it (the search writes result_scores.json instead),
+        # so this resulttype is a clean error rather than a FileNotFoundError 500.
+        return {'status': 'error', 'message': 'metadata result is not produced by Scstquery tasks'}
 
     def download(self, filename):
         """Read a file from the task workspace and return it base64-encoded (legacy JSON contract).
