@@ -1,5 +1,5 @@
 from .base import Module
-from .scquery import Scquery
+from .legacy_scquery import Scquery
 from .scstquery import Scstquery
 from .subscstquery import SubScstquery
 
