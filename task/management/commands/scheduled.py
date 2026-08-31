@@ -1,6 +1,6 @@
 from task.serializers import taskSerializer
 from django.core.management.base import BaseCommand, CommandError
-from task.models import tasks, TaskStatus
+from task.models import tasks, TaskStatus, SubTask, PSEUDO_JOB_IDS
 from utils.slurm_api import normalize_slurm_status, get_job_status as slurm_get_job_status
 import datetime, pickle, json, os
 from django.utils import timezone
@@ -122,6 +122,26 @@ class Command(BaseCommand):
                         self._append_change_log(f'Task {task.id} updated to {task.status}')
                 except Exception:
                     pass
+
+        # Sync active subtasks that are stuck in Running/Pending but SLURM already finished.
+        # Frontend polling (subtask_status_update) also syncs, but it requires the
+        # browser to be open and the backend to be up. This background sync covers
+        # the gap when the web service was down or the user navigated away.
+        try:
+            active_statuses = ['Running', 'Pending', 'Created', 'Configuring', 'Completing', 'Requeued', 'Suspended']
+            active_subtasks = SubTask.objects.filter(status__in=active_statuses).exclude(job_id__in=PSEUDO_JOB_IDS).exclude(job_id__isnull=True).exclude(job_id__exact='')
+            for st in active_subtasks:
+                try:
+                    prev = st.status
+                    new_status = st.sync_from_slurm()
+                    if new_status and new_status != prev:
+                        st.save(update_fields=['status', 'updated_at'])
+                        self.stdout.write(self.style.SUCCESS(f'SubTask {st.id} ({st.subtask_type}) {prev} -> {new_status}'))
+                        self._append_change_log(f'SubTask {st.id} updated to {new_status}')
+                except Exception as e:
+                    self.stdout.write(self.style.WARNING(f'SubTask {st.id} sync failed: {e}'))
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f'SubTask sync pass failed: {e}'))
 
     def _append_change_log(self, msg):
         """Write a line only for real changes (not on empty runs), so update.txt stops growing."""
