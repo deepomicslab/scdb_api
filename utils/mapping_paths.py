@@ -8,7 +8,7 @@ import os
 
 MAPPING_OUTPUT_FILENAME = 'input_sc_spatial.h5ad'
 
-ALL_METHODS = ('cytospace', 'tangram', 'he_scatter', 'hierarchical_clustering')
+ALL_METHODS = ('he_scatter', 'hierarchical_clustering', 'cytospace', 'tangram')
 
 
 def get_mapping_output_subpath(method):
