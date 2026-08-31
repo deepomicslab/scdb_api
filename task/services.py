@@ -242,12 +242,13 @@ def _create_subtask_tx(main_task, usertask_dir, dataset_id, subtasktype,
                 submitted_job_ids.append(prereq_job_id)
 
     # Explicit mapping dependency check for commot/cellchat/spider
+    # Do not persist a FAILED row for this validation: the transaction will
+    # roll back the initial CREATED row, so no stale Failed remains to
+    # pollute methodStates / localStorage (user can retry after mapping completes).
     if subtasktype in MAPPING_DEPENDENT_TYPES:
         mapping_method = parameters_dict.get('mapping_method', 'cytospace')
         mapping_base = os.path.join(local_settings.USERTASKPATH, usertask_dir)
         if not check_mapping_completed(mapping_base, dataset_uuid, mapping_method):
-            new_subtask.status = TaskStatus.FAILED
-            new_subtask.save()
             raise ValueError(
                 f"SC-ST Mapping ({mapping_method}) has not completed. Please run it first."
             )
