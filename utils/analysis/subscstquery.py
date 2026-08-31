@@ -260,7 +260,9 @@ class SubScstquery(Module):
             elif mapping_method == 'cytospace':
                 cs_mcn = str(params.get('mean_cell_numbers', 2))
                 cs_dm = params.get('distance_metric', 'Pearson_correlation')
-                self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir, cs_mcn, cs_dm]
+                # hidden interface for place_holders uniqueness (not exposed in frontend)
+                cs_sam = params.get('sampling_method', 'duplicates')
+                self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir, cs_mcn, cs_dm, cs_sam]
             else:
                 self.script_arguments = [inputfilepath, st_h5ad_path, method_outputdir]
         elif subtask_type == 'scgpt_embedding':
