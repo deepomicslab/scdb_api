@@ -110,9 +110,7 @@ class CommonMixin:
         try:
             from task.models import SubTask, tasks as task_model
             main_task = task_model.objects.get(userpath=self.path.replace(local_settings.USERTASKPATH, ''))
-            for st in SubTask.objects.filter(main_task=main_task).exclude(
-                subtask_type='hierarchical_clustering'
-            ).exclude(status='Created').order_by('-id'):
+            for st in SubTask.objects.filter(main_task=main_task).exclude(status='Created').order_by('-id'):
                 dp = st.dataset_path
                 if dp not in subtask_map:
                     subtask_map[dp] = {}
