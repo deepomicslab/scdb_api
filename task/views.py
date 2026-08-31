@@ -720,6 +720,16 @@ def _subtask_status_update_locked(subtaskid):
                 'job_id': 'viewer_only',
                 'message': 'HC completed, viewer ready.'
             })
+        if hc_subtask and (hc_subtask.status or '').upper() == 'FAILED':
+            subtask.status = TaskStatus.FAILED
+            subtask.save(update_fields=['status', 'updated_at'])
+            return Response({
+                'status': 'Success',
+                'current_status': TaskStatus.FAILED,
+                'job_id': job_id,
+                'hc_job_id': (subtask.parameters or {}).get('_hc_job_id', 'unknown'),
+                'message': 'HC failed, viewer cannot complete.'
+            })
         hc_job = (subtask.parameters or {}).get('_hc_job_id', 'unknown')
         return Response({
             'status': 'Success',
@@ -746,6 +756,16 @@ def _subtask_status_update_locked(subtaskid):
                 'current_status': TaskStatus.COMPLETED,
                 'job_id': 'viewer_only',
                 'message': 'HE scatter completed, annotation viewer ready.'
+            })
+        if hs_subtask and (hs_subtask.status or '').upper() == 'FAILED':
+            subtask.status = TaskStatus.FAILED
+            subtask.save(update_fields=['status', 'updated_at'])
+            return Response({
+                'status': 'Success',
+                'current_status': TaskStatus.FAILED,
+                'job_id': job_id,
+                'hs_job_id': (subtask.parameters or {}).get('_hs_job_id', 'unknown'),
+                'message': 'HE scatter failed, annotation viewer cannot complete.'
             })
         hs_job = (subtask.parameters or {}).get('_hs_job_id', 'unknown')
         return Response({
@@ -774,6 +794,16 @@ def _subtask_status_update_locked(subtaskid):
                 'current_status': TaskStatus.COMPLETED,
                 'job_id': 'viewer_only',
                 'message': 'scGPT embedding completed, viewer ready.'
+            })
+        if scgpt_subtask and (scgpt_subtask.status or '').upper() == 'FAILED':
+            subtask.status = TaskStatus.FAILED
+            subtask.save(update_fields=['status', 'updated_at'])
+            return Response({
+                'status': 'Success',
+                'current_status': TaskStatus.FAILED,
+                'job_id': job_id,
+                'scgpt_job_id': (subtask.parameters or {}).get('_scgpt_job_id', 'unknown'),
+                'message': 'scGPT embedding failed, viewer cannot complete.'
             })
         scgpt_job = (subtask.parameters or {}).get('_scgpt_job_id', 'unknown')
         return Response({

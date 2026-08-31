@@ -143,6 +143,49 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.WARNING(f'SubTask sync pass failed: {e}'))
 
+        # Sync pending viewers that wait for a prerequisite (HC/HE/scgpt).
+        # If the prerequisite Completed, the viewer becomes Completed (viewer_only);
+        # if it Failed, the viewer also becomes Failed so the UI does not stay
+        # Pending forever (frontend polling also handles this, but this covers
+        # the gap when the browser is closed).
+        try:
+            pending_map = {
+                'pending_hc': ('recall_analysis', 'hierarchical_clustering'),
+                'pending_he_scatter': ('annotation_mapping', 'he_scatter'),
+                'pending_scgpt': (('umap_embedding', 'heatmap_embedding'), 'scgpt_embedding'),
+            }
+            for pending_job, (viewer_types, prereq_type) in pending_map.items():
+                if isinstance(viewer_types, str):
+                    viewer_types = (viewer_types,)
+                viewers = SubTask.objects.filter(job_id=pending_job, subtask_type__in=viewer_types, status__iexact='Pending')
+                for v in viewers:
+                    prereq = SubTask.objects.filter(
+                        main_task=v.main_task, subtask_type=prereq_type, dataset_path=v.dataset_path
+                    ).order_by('-id').first()
+                    if not prereq:
+                        continue
+                    # Sync the prerequisite's SLURM status first
+                    try:
+                        prereq_new = prereq.sync_from_slurm()
+                        if prereq_new and prereq_new != prereq.status:
+                            prereq.save(update_fields=['status', 'updated_at'])
+                    except Exception:
+                        pass
+                    prereq_upper = (prereq.status or '').upper()
+                    if prereq_upper == 'COMPLETED':
+                        v.status = TaskStatus.COMPLETED
+                        v.job_id = 'viewer_only'
+                        v.save(update_fields=['status', 'job_id', 'updated_at'])
+                        self.stdout.write(self.style.SUCCESS(f'Pending viewer {v.id} -> Completed (prereq {prereq.id} completed)'))
+                        self._append_change_log(f'SubTask {v.id} updated to Completed (prereq completed)')
+                    elif prereq_upper == 'FAILED':
+                        v.status = TaskStatus.FAILED
+                        v.save(update_fields=['status', 'updated_at'])
+                        self.stdout.write(self.style.WARNING(f'Pending viewer {v.id} -> Failed (prereq {prereq.id} failed)'))
+                        self._append_change_log(f'SubTask {v.id} updated to Failed (prereq failed)')
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f'Pending viewer sync failed: {e}'))
+
     def _append_change_log(self, msg):
         """Write a line only for real changes (not on empty runs), so update.txt stops growing."""
         try:
