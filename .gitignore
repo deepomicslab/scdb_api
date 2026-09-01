@@ -14,4 +14,4 @@ logs/
 
 # Secrets / local config (contains DB password, keys, paths)
 .env
-scdb_api/settings_local.pydemo_result
+scdb_api/settings_local.py
