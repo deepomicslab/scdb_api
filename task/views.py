@@ -1039,8 +1039,7 @@ def createDemoTask(request):
                     pass
                 uuid = uuid or demo_dataset_id
 
-                # __file__ = .../scdb_api/scdb_api/task/views.py -> ../../.. = repo root
-                repo_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'demo_result', 'scst'))
+                repo_root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'demo_result', 'scst'))
                 ws_root = os.path.normpath(os.path.join(local_settings.USERTASKPATH, '..', 'demo_result', 'scst'))
                 demo_snapshot = None
                 for root in (repo_root, ws_root):
