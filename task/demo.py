@@ -96,6 +96,7 @@ def _available_mapping_methods(ds_dir, subtask_type):
     return sorted(
         name for name in os.listdir(base)
         if os.path.isdir(os.path.join(base, name))
+        and any(os.scandir(os.path.join(base, name)))
     )
 
 
