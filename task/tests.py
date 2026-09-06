@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -933,7 +934,7 @@ class ParameterValidationTests(TestCase):
 
 
 class CreateDemoTaskTests(TestCase):
-    """createdemotask: instant Completed demo task, no SLURM, schema-valid fixture."""
+    """createdemotask: instant Completed demo task built from a real-result snapshot."""
 
     @classmethod
     def setUpClass(cls):
@@ -944,18 +945,96 @@ class CreateDemoTaskTests(TestCase):
         django.setup()
 
     def setUp(self):
+        import tempfile
+
         from dataset.models import Dataset
 
         self.owner = 'demo_owner'
+        self.dataset_title = 'GSE195665_visium_spatial-sample_v02'
         self.dataset = Dataset.objects.create(
             dataset_id='Breast_Normal_002',
-            title='GSE195665_visium_spatial-sample_v02',
+            title=self.dataset_title,
             file_path='/tmp/demo_breast.h5ad',
             organ='breast',
             disease='Normal',
             scalef_raw=0.09,
             spot_diameter_fullres=120.0,
         )
+        # Minimal real-result snapshot under <USERTASKPATH>/demo_result/scst/<title>:
+        # breast + lung entries in the real scores, plus per-method tool files.
+        self.tmp_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp_root, ignore_errors=True)
+        self.snapshot = os.path.join(
+            self.tmp_root, 'demo_result', 'scst', self.dataset_title
+        )
+        scores = {
+            'breast': {
+                f'/data3/fake/st_build_db/breast/{self.dataset_title}/st_marker/test_marker.csv': {
+                    'match_score': 1.0, 'fused_rank': 1, 'fused_score': 0.9,
+                },
+            },
+            'lung': {
+                '/data3/fake/st_build_db/lung/Lung_X_001/st_marker/test_marker.csv': {
+                    'match_score': 0.8, 'fused_rank': 1, 'fused_score': 0.8,
+                },
+            },
+        }
+        fixture_files = {
+            os.path.join('result', 'sc_query', 'result_scores.json'): json.dumps(scores),
+            os.path.join('result', 'he', 'all_merged_data_with_labels.csv'): 'x,y,Label\n',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_scst_mapping', 'result', 'sc_st_mapping', 'cytospace', 'input_sc_spatial.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_scst_mapping', 'result', 'sc_st_mapping', 'tangram', 'input_sc_spatial.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_he_scatter', 'result', 'input_sc_spatial.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_hierarchical_clustering', 'result', 'input_sc_spatial.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_commot', 'result', 'sc_st_mapping', 'he_scatter', 'input_sc_LR.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_commot', 'result', 'sc_st_mapping', 'tangram', 'input_sc_LR.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_spider', 'result', 'sc_st_mapping', 'tangram', 'adata_spider.h5ad',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_alphatalk', 'result', 'sc_st_mapping', 'tangram', 'cci_result.pkl',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_lr_comparison', 'result', 'sc_st_mapping', 'tangram', 'spearman',
+                'lr_level_spearman_correlation_sc_st.csv',
+            ): '',
+            os.path.join(
+                'dataset_' + self.dataset_title,
+                'subtask_scgpt_embedding', 'result', 'cell_embeddings_umap.png',
+            ): '',
+        }
+        for rel, content in fixture_files.items():
+            path = os.path.join(self.snapshot, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        # rows: scst_mapping x ALL_METHODS(4) + 4 base + commot2/cellchat1/spider1/alphatalk1/lr1 + 3 scgpt
+        self.expected_rows = 18
 
     def tearDown(self):
         from dataset.models import Dataset
@@ -964,22 +1043,27 @@ class CreateDemoTaskTests(TestCase):
         task_model.objects.filter(user=self.owner).delete()
         Dataset.objects.filter(dataset_id='Breast_Normal_002').delete()
 
+    def _workspace_patch(self):
+        from unittest import mock
+
+        import task.views as views
+
+        # USERTASKPATH holds both the task dirs and the demo_result snapshot root
+        return mock.patch.object(views.local_settings, 'USERTASKPATH', self.tmp_root + '/')
+
     def test_create_demo_task_success_no_slurm(self):
-        import tempfile
+        import json as json_module
         from unittest import mock
 
         from django.test import Client
         import task.views as views
         from task.models import tasks as task_model, SubTask
 
-        tmp_workspace = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
-
         def _no_slurm(*a, **k):
             raise AssertionError('createDemoTask must never submit SLURM jobs')
 
         c = Client()
-        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'), \
+        with self._workspace_patch(), \
                 mock.patch('utils.slurm_api.submit_job', side_effect=_no_slurm):
             resp = c.post('/tasks/createdemotask/', {
                 'userid': self.owner, 'dataset_id': 'Breast_Normal_002', 'taskname': 'Demo Task',
@@ -994,57 +1078,104 @@ class CreateDemoTaskTests(TestCase):
         self.assertEqual(task.modulelist, 'Scstquery')
 
         subs = list(SubTask.objects.filter(main_task=task))
-        self.assertEqual(len(subs), 14)
+        self.assertEqual(len(subs), self.expected_rows)
         for st in subs:
             self.assertEqual(st.status, 'Completed')
             self.assertEqual(st.job_id, 'viewer_only')
-        # method-aware interaction rows carry mapping_method for restore
-        commot = SubTask.objects.get(main_task=task, subtask_type='commot')
-        self.assertEqual(commot.parameters.get('mapping_method'), 'he_scatter')
-        self.assertTrue(SubTask.objects.filter(
-            main_task=task, subtask_type='scst_mapping',
-            parameters__mapping_method='cytospace').exists())
-        self.assertTrue(SubTask.objects.filter(
-            main_task=task, subtask_type='scst_mapping',
-            parameters__mapping_method='tangram').exists())
+        # interaction rows exist exactly for the mapping methods present in the snapshot
+        self.assertEqual(
+            sorted(st.parameters.get('mapping_method') for st in subs if st.subtask_type == 'commot'),
+            ['he_scatter', 'tangram'],
+        )
+        self.assertEqual(
+            [st.parameters.get('mapping_method') for st in subs if st.subtask_type == 'cellchat'],
+            ['tangram'],
+        )
 
-        # workspace fixture: card scores + mapping markers for all 4 methods
-        task_dir = os.path.join(tmp_workspace, task.userpath)
-        self.assertTrue(os.path.isfile(os.path.join(task_dir, 'taskdetail.json')))
-        self.assertTrue(os.path.isfile(
-            os.path.join(task_dir, 'result', 'sc_query', 'result_scores.json')))
-        from utils.mapping_paths import ALL_METHODS, resolve_mapping_output_path
-        for method in ALL_METHODS:
-            self.assertTrue(os.path.isfile(
-                resolve_mapping_output_path(
-                    task_dir, 'GSE195665_visium_spatial-sample_v02', method)))
+        # workspace: taskdetail marks demo, scores filtered to the demo organ only
+        task_dir = os.path.join(self.tmp_root, task.userpath)
+        with open(os.path.join(task_dir, 'taskdetail.json'), encoding='utf-8') as f:
+            detail = json_module.load(f)
+        self.assertTrue(detail[0]['parameters_dict']['demo'])
+        scores_path = os.path.join(task_dir, 'result', 'sc_query', 'result_scores.json')
+        with open(scores_path, encoding='utf-8') as f:
+            scores = json_module.load(f)
+        self.assertEqual(list(scores.keys()), ['breast'])
+
+        # workspace files are hardlinks into the snapshot (same inode, no copy)
+        linked = os.path.join(
+            task_dir, 'dataset_' + self.dataset_title,
+            'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
+        )
+        source = os.path.join(
+            self.snapshot, 'dataset_' + self.dataset_title,
+            'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
+        )
+        self.assertTrue(os.path.samefile(linked, source))
+        # snapshot scores file was not modified by the organ filter
+        with open(os.path.join(self.snapshot, 'result', 'sc_query', 'result_scores.json'), encoding='utf-8') as f:
+            self.assertIn('lung', f.read())
 
         # visible in the owner's workspace list
         listed = c.get('/tasks/list/', {'userid': self.owner}).json()['results']
         self.assertTrue(any(r['name'] == 'Demo Task' for r in listed))
 
-    def test_create_demo_task_missing_userid_400(self):
+    def test_create_demo_task_missing_snapshot_500(self):
+        import shutil
+        from unittest import mock
+
         from django.test import Client
+        from task.models import tasks as task_model
 
-        resp = Client().post('/tasks/createdemotask/', {'dataset_id': 'Breast_Normal_002'})
-        self.assertEqual(resp.status_code, 400)
+        shutil.rmtree(os.path.join(self.tmp_root, 'demo_result', 'scst', self.dataset_title))
+        c = Client()
+        with self._workspace_patch():
+            resp = c.post('/tasks/createdemotask/', {
+                'userid': self.owner, 'dataset_id': 'Breast_Normal_002',
+            })
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn('Demo snapshot not found', resp.json().get('message', ''))
+        self.assertFalse(task_model.objects.filter(user=self.owner).exists())
 
-    def test_create_demo_task_unknown_dataset_400_no_side_effects(self):
-        import tempfile
+    def test_create_subtask_rejected_for_demo_task(self):
         from unittest import mock
 
         from django.test import Client
         import task.views as views
-        from task.models import tasks as task_model
-
-        tmp_workspace = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+        from task.models import tasks as task_model, SubTask
 
         c = Client()
-        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
+        with self._workspace_patch():
+            resp = c.post('/tasks/createdemotask/', {
+                'userid': self.owner, 'dataset_id': 'Breast_Normal_002',
+            })
+        taskid = resp.json()['data']['taskid']
+        with self._workspace_patch():
+            resp = c.post('/tasks/createsubtask/', {
+                'taskid': taskid, 'userid': self.owner, 'dataset_id': 'Breast_Normal_002',
+                'subtasktype': 'commot', 'parameters': json.dumps({'mapping_method': 'tangram'}),
+            })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('read-only', resp.json().get('message', ''))
+        self.assertFalse(SubTask.objects.filter(main_task_id=taskid, subtask_type='commot').exists())
+
+    def test_create_demo_task_missing_userid_400(self):
+        from django.test import Client
+
+        c = Client()
+        with self._workspace_patch():
+            resp = c.post('/tasks/createdemotask/', {'dataset_id': 'Breast_Normal_002'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_demo_task_unknown_dataset_400_no_side_effects(self):
+        from django.test import Client
+        from task.models import tasks as task_model
+
+        c = Client()
+        with self._workspace_patch():
             resp = c.post('/tasks/createdemotask/', {
                 'userid': self.owner, 'dataset_id': 'NO_SUCH_DATASET',
             })
         self.assertEqual(resp.status_code, 400)
         self.assertFalse(task_model.objects.filter(user=self.owner).exists())
-        self.assertEqual(os.listdir(tmp_workspace), [])
+        self.assertEqual(os.listdir(self.tmp_root), ['demo_result'])

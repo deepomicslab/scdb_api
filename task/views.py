@@ -593,6 +593,12 @@ def create_subtask(request):
         # Uniform 403 for unknown / not-owned: do not reveal whether a task exists
         return Response({'status': 'Failed', 'message': 'Access denied'}, status=403)
 
+    # Demo tasks are pre-completed fixtures; never let any client path submit
+    # SLURM work against them (Re-run is hidden in the UI, this is the backstop).
+    from task.demo import task_is_demo
+    if task_is_demo(main_task):
+        return Response({'status': 'Failed', 'message': 'Demo tasks are read-only; re-run is disabled'}, status=400)
+
     parameters_string = request.data.get('parameters')
     if not parameters_string:
         return Response({'status': 'Failed', 'message': 'Missing parameters'}, status=400)
@@ -629,6 +635,7 @@ def createDemoTask(request):
         demo_task_parameters,
     )
 
+
     userid = request.data.get('userid')
     if not userid:
         return Response({'status': 'Failed', 'message': 'Missing userid'}, status=400)
@@ -659,7 +666,7 @@ def createDemoTask(request):
                 'status': 'Completed',
             }], f, ensure_ascii=False, indent=4)
         task_abs_path = os.path.abspath(userpath)
-        build_demo_snapshot(task_abs_path, dataset, organ=parameters['organParts'])
+        build_demo_snapshot(task_abs_path, dataset, parameters['organParts'])
         with transaction.atomic():
             demo_task = tasks.objects.create(
                 name=demo_name,
@@ -669,7 +676,10 @@ def createDemoTask(request):
                 status=TaskStatus.COMPLETED,
                 modulelist='Scstquery',
             )
-            create_demo_task_rows(demo_task, dataset_id)
+            create_demo_task_rows(
+                demo_task, dataset_id,
+                os.path.join(task_abs_path, f'dataset_{dataset.title}'),
+            )
         return Response({
             'status': 'Success',
             'message': 'Demo task created',
