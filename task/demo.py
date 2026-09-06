@@ -81,8 +81,16 @@ def _copy_tree(src, dst):
 
 
 def _available_mapping_methods(ds_dir, subtask_type):
-    """Mapping methods that actually have result files for a tool."""
-    base = os.path.join(ds_dir, f'subtask_{subtask_type}', 'result', 'sc_st_mapping')
+    """Mapping methods that actually have result files for a tool.
+
+    Interaction tools (commot/cellchat/spider/alphatalk/lr_comparison) store
+    outputs under result/sc_st_mapping/<method>/, while the scst_mapping
+    subtask itself stores them directly under result/<method>/.
+    """
+    if subtask_type == 'scst_mapping':
+        base = os.path.join(ds_dir, 'subtask_scst_mapping', 'result')
+    else:
+        base = os.path.join(ds_dir, f'subtask_{subtask_type}', 'result', 'sc_st_mapping')
     if not os.path.isdir(base):
         return []
     return sorted(
