@@ -611,6 +611,77 @@ def create_subtask(request):
         traceback.print_exc()
         return Response({'status': 'Failed', 'message': f'Subtask creation failed: {str(e)}'})
 
+
+@api_view(['POST'])
+def createDemoTask(request):
+    """Create an instantly completed demo task.
+
+    The endpoint mimics a real Scstquery submission workflow (task row,
+    subtask rows, workspace files, workspace task list) but never submits
+    SLURM work. All SubTask rows use the viewer_only pseudo job id, so status
+    polling and scheduled sync leave them untouched.
+    """
+    from task.demo import (
+        DEMO_DATASET_ID,
+        DEMO_TASK_NAME,
+        build_demo_snapshot,
+        create_demo_task_rows,
+        demo_task_parameters,
+    )
+
+    userid = request.data.get('userid')
+    if not userid:
+        return Response({'status': 'Failed', 'message': 'Missing userid'}, status=400)
+    dataset_id = request.data.get('dataset_id') or DEMO_DATASET_ID
+    demo_name = request.data.get('taskname') or DEMO_TASK_NAME
+
+    try:
+        dataset = Dataset.objects.get(dataset_id=dataset_id)
+    except Dataset.DoesNotExist:
+        return Response(
+            {'status': 'Failed', 'message': f'Unknown dataset_id: {dataset_id}'},
+            status=400,
+        )
+
+    parameters = demo_task_parameters(dataset, demo_name)
+    usertask_dir = str(int(time.time())) + '_' + str(random.randint(1000, 9999))
+    userpath = local_settings.USERTASKPATH + usertask_dir
+    created_dir = False
+    try:
+        os.makedirs(userpath, exist_ok=False)
+        created_dir = True
+        os.makedirs(os.path.join(userpath, 'upload'), exist_ok=True)
+        with open(os.path.join(userpath, 'taskdetail.json'), 'w', encoding='utf-8') as f:
+            json.dump([{
+                'modulename': 'Scstquery',
+                'parameters_dict': parameters,
+                'job_id': 'viewer_only',
+                'status': 'Completed',
+            }], f, ensure_ascii=False, indent=4)
+        task_abs_path = os.path.abspath(userpath)
+        build_demo_snapshot(task_abs_path, dataset, organ=parameters['organParts'])
+        with transaction.atomic():
+            demo_task = tasks.objects.create(
+                name=demo_name,
+                user=userid,
+                userpath=usertask_dir,
+                task_type='module',
+                status=TaskStatus.COMPLETED,
+                modulelist='Scstquery',
+            )
+            create_demo_task_rows(demo_task, dataset_id)
+        return Response({
+            'status': 'Success',
+            'message': 'Demo task created',
+            'data': {'taskid': demo_task.id},
+        })
+    except Exception as e:
+        traceback.print_exc()
+        if created_dir and os.path.exists(userpath):
+            import shutil
+            shutil.rmtree(userpath, ignore_errors=True)
+        return Response({'status': 'Failed', 'message': f'Demo task creation failed: {str(e)}'}, status=500)
+
 # view.py
 @api_view(['GET'])
 def subtask_status_update(request):

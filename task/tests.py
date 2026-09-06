@@ -930,3 +930,121 @@ class ParameterValidationTests(TestCase):
         # the uploaded task dir must not be left behind
         leftovers = [p for p in os.listdir(tmp_workspace) if p != 'input.h5ad']
         self.assertEqual(leftovers, [])
+
+
+class CreateDemoTaskTests(TestCase):
+    """createdemotask: instant Completed demo task, no SLURM, schema-valid fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'scdb_api.settings')
+        import django
+
+        django.setup()
+
+    def setUp(self):
+        from dataset.models import Dataset
+
+        self.owner = 'demo_owner'
+        self.dataset = Dataset.objects.create(
+            dataset_id='Breast_Normal_002',
+            title='GSE195665_visium_spatial-sample_v02',
+            file_path='/tmp/demo_breast.h5ad',
+            organ='breast',
+            disease='Normal',
+            scalef_raw=0.09,
+            spot_diameter_fullres=120.0,
+        )
+
+    def tearDown(self):
+        from dataset.models import Dataset
+        from task.models import tasks as task_model
+
+        task_model.objects.filter(user=self.owner).delete()
+        Dataset.objects.filter(dataset_id='Breast_Normal_002').delete()
+
+    def test_create_demo_task_success_no_slurm(self):
+        import tempfile
+        from unittest import mock
+
+        from django.test import Client
+        import task.views as views
+        from task.models import tasks as task_model, SubTask
+
+        tmp_workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+
+        def _no_slurm(*a, **k):
+            raise AssertionError('createDemoTask must never submit SLURM jobs')
+
+        c = Client()
+        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'), \
+                mock.patch('utils.slurm_api.submit_job', side_effect=_no_slurm):
+            resp = c.post('/tasks/createdemotask/', {
+                'userid': self.owner, 'dataset_id': 'Breast_Normal_002', 'taskname': 'Demo Task',
+            })
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body.get('status'), 'Success')
+        taskid = body['data']['taskid']
+
+        task = task_model.objects.get(id=taskid, user=self.owner)
+        self.assertEqual(task.status, 'Completed')
+        self.assertEqual(task.modulelist, 'Scstquery')
+
+        subs = list(SubTask.objects.filter(main_task=task))
+        self.assertEqual(len(subs), 14)
+        for st in subs:
+            self.assertEqual(st.status, 'Completed')
+            self.assertEqual(st.job_id, 'viewer_only')
+        # method-aware interaction rows carry mapping_method for restore
+        commot = SubTask.objects.get(main_task=task, subtask_type='commot')
+        self.assertEqual(commot.parameters.get('mapping_method'), 'he_scatter')
+        self.assertTrue(SubTask.objects.filter(
+            main_task=task, subtask_type='scst_mapping',
+            parameters__mapping_method='cytospace').exists())
+        self.assertTrue(SubTask.objects.filter(
+            main_task=task, subtask_type='scst_mapping',
+            parameters__mapping_method='tangram').exists())
+
+        # workspace fixture: card scores + mapping markers for all 4 methods
+        task_dir = os.path.join(tmp_workspace, task.userpath)
+        self.assertTrue(os.path.isfile(os.path.join(task_dir, 'taskdetail.json')))
+        self.assertTrue(os.path.isfile(
+            os.path.join(task_dir, 'result', 'sc_query', 'result_scores.json')))
+        from utils.mapping_paths import ALL_METHODS, resolve_mapping_output_path
+        for method in ALL_METHODS:
+            self.assertTrue(os.path.isfile(
+                resolve_mapping_output_path(
+                    task_dir, 'GSE195665_visium_spatial-sample_v02', method)))
+
+        # visible in the owner's workspace list
+        listed = c.get('/tasks/list/', {'userid': self.owner}).json()['results']
+        self.assertTrue(any(r['name'] == 'Demo Task' for r in listed))
+
+    def test_create_demo_task_missing_userid_400(self):
+        from django.test import Client
+
+        resp = Client().post('/tasks/createdemotask/', {'dataset_id': 'Breast_Normal_002'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_demo_task_unknown_dataset_400_no_side_effects(self):
+        import tempfile
+        from unittest import mock
+
+        from django.test import Client
+        import task.views as views
+        from task.models import tasks as task_model
+
+        tmp_workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_workspace, ignore_errors=True)
+
+        c = Client()
+        with mock.patch.object(views.local_settings, 'USERTASKPATH', tmp_workspace + '/'):
+            resp = c.post('/tasks/createdemotask/', {
+                'userid': self.owner, 'dataset_id': 'NO_SUCH_DATASET',
+            })
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(task_model.objects.filter(user=self.owner).exists())
+        self.assertEqual(os.listdir(tmp_workspace), [])

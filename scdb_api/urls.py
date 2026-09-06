@@ -34,6 +34,7 @@ urlpatterns = [
     path('tasks/getImg/', task.views.getImg),
     #subtask create
     path('tasks/createsubtask/', task.views.create_subtask),
+    path('tasks/createdemotask/', task.views.createDemoTask),
     path('tasks/subtask/status/', task.views.subtask_status_update),
     path('tasks/subtask/log/', task.views.subtask_log),
     
