@@ -984,11 +984,11 @@ class CreateDemoTaskTests(TestCase):
             os.path.join('result', 'he', 'all_merged_data_with_labels.csv'): 'x,y,Label\n',
             os.path.join(
                 'dataset_' + self.dataset_title,
-                'subtask_scst_mapping', 'result', 'sc_st_mapping', 'cytospace', 'input_sc_spatial.h5ad',
+                'subtask_scst_mapping', 'result', 'cytospace', 'input_sc_spatial.h5ad',
             ): '',
             os.path.join(
                 'dataset_' + self.dataset_title,
-                'subtask_scst_mapping', 'result', 'sc_st_mapping', 'tangram', 'input_sc_spatial.h5ad',
+                'subtask_scst_mapping', 'result', 'tangram', 'input_sc_spatial.h5ad',
             ): '',
             os.path.join(
                 'dataset_' + self.dataset_title,
