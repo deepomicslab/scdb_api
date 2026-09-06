@@ -1,11 +1,12 @@
-"""Demo task construction: link a pre-built real-result snapshot.
+"""Demo task construction: copy a pre-built real-result snapshot.
 
 Try Demo creates a real tasks/SubTask graph that is already Completed. It
-never submits SLURM work. The workspace is populated by hard-linking a
-snapshot of a REAL completed analysis (result/ + dataset_<uuid>/) from
+never submits SLURM work. The workspace is populated by copying a snapshot
+of a REAL completed analysis (result/ + dataset_<uuid>/) from
 user_data/demo_result/scst/<uuid>/, so every panel shows the genuine output
-of that run. Hardlinks keep creation instant and cost no extra disk; removing
-the demo task only unlinks the entries inside the task directory.
+of that run. Real copies keep each demo workspace fully independent, so any
+later cleanup of the snapshot source or of past demo tasks cannot break a
+live demo.
 """
 
 import json
@@ -73,21 +74,10 @@ def task_is_demo(main_task):
     )
 
 
-def _hardlink_tree(src, dst):
-    """Recursively hardlink every file under src into dst (copy fallback)."""
-    for root, _dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        dst_root = dst if rel == '.' else os.path.join(dst, rel)
-        os.makedirs(dst_root, exist_ok=True)
-        for name in files:
-            dst_file = os.path.join(dst_root, name)
-            if os.path.exists(dst_file):
-                continue
-            try:
-                os.link(os.path.join(root, name), dst_file)
-            except OSError:
-                import shutil
-                shutil.copy2(os.path.join(root, name), dst_file)
+def _copy_tree(src, dst):
+    """Recursively copy every file under src into dst (real copies)."""
+    import shutil
+    shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
 def _available_mapping_methods(ds_dir, subtask_type):
@@ -104,18 +94,14 @@ def _available_mapping_methods(ds_dir, subtask_type):
 def demo_subtask_specs(ds_dir, dataset_id):
     """SubTask rows mirroring what the snapshot really contains.
 
-    The SC-ST Mapping tool gets a row for every ALL_METHODS entry (the mapping
-    outputs for the Query/Hierarchical methods live in their own subtask dirs,
-    so scstmappingStatus reports all four as completed). Interaction tools get
-    one row per mapping method that actually has result files, so the frontend
-    per-method state restores to Completed exactly where data exists (the
-    snapshot run used tangram for cellchat/spider/alphatalk, he_scatter+
-    tangram for commot/lr_comparison).
+    Every tool gets one row per mapping method that actually has result files
+    in the snapshot (the pruned snapshot carries cytospace+tangram mapping
+    outputs and tangram interaction data, plus he_scatter for commot/
+    lr_comparison where the real run produced them), so the frontend per-
+    method state restores to Completed exactly where data exists.
     """
-    from utils.mapping_paths import ALL_METHODS
-
     specs = []
-    for method in ALL_METHODS:
+    for method in _available_mapping_methods(ds_dir, 'scst_mapping'):
         specs.append(('scst_mapping', {'demo': True, 'dataset_id': dataset_id, 'mapping_method': method}))
     for st in ('he_scatter', 'hierarchical_clustering', 'annotation_mapping', 'recall_analysis'):
         specs.append((st, {'demo': True, 'dataset_id': dataset_id}))
@@ -162,8 +148,8 @@ def _write_organ_filtered_scores(task_abs_path, organ):
 def build_demo_snapshot(task_abs_path, dataset, organ):
     """Populate the task workspace from the real-result snapshot.
 
-    Links result/ + dataset_<uuid>/ and filters the real result_scores.json to
-    the demo organ so the card list stays scoped (the frontend enables only
+    Copies result/ + dataset_<uuid>/ and filters the real result_scores.json
+    to the demo organ so the card list stays scoped (the frontend enables only
     the demo dataset anyway). Raises FileNotFoundError when no snapshot exists
     so createDemoTask fails loudly instead of serving an empty demo.
     """
@@ -174,9 +160,9 @@ def build_demo_snapshot(task_abs_path, dataset, organ):
             f'Demo snapshot not found for {uuid}; expected under '
             'user_data/demo_result/scst/ or <repo>/demo_result/scst/'
         )
-    _hardlink_tree(os.path.join(snapshot, 'result'), os.path.join(task_abs_path, 'result'))
+    _copy_tree(os.path.join(snapshot, 'result'), os.path.join(task_abs_path, 'result'))
     ds_src = os.path.join(snapshot, f'dataset_{uuid}')
     if os.path.isdir(ds_src):
-        _hardlink_tree(ds_src, os.path.join(task_abs_path, f'dataset_{uuid}'))
+        _copy_tree(ds_src, os.path.join(task_abs_path, f'dataset_{uuid}'))
     _write_organ_filtered_scores(task_abs_path, organ)
     return snapshot

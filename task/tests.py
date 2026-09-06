@@ -1033,8 +1033,8 @@ class CreateDemoTaskTests(TestCase):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
-        # rows: scst_mapping x ALL_METHODS(4) + 4 base + commot2/cellchat1/spider1/alphatalk1/lr1 + 3 scgpt
-        self.expected_rows = 18
+        # rows: scst_mapping x2 (dirs) + 4 base + commot2/cellchat1/spider1/alphatalk1/lr1 + 3 scgpt
+        self.expected_rows = 15
 
     def tearDown(self):
         from dataset.models import Dataset
@@ -1102,8 +1102,8 @@ class CreateDemoTaskTests(TestCase):
             scores = json_module.load(f)
         self.assertEqual(list(scores.keys()), ['breast'])
 
-        # workspace files are hardlinks into the snapshot (same inode, no copy)
-        linked = os.path.join(
+        # workspace files are real copies of the snapshot (independent inodes)
+        copied = os.path.join(
             task_dir, 'dataset_' + self.dataset_title,
             'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
         )
@@ -1111,7 +1111,10 @@ class CreateDemoTaskTests(TestCase):
             self.snapshot, 'dataset_' + self.dataset_title,
             'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
         )
-        self.assertTrue(os.path.samefile(linked, source))
+        self.assertTrue(os.path.isfile(copied))
+        self.assertFalse(os.path.samestat(os.stat(copied), os.stat(source)))
+        with open(copied, encoding='utf-8') as f:
+            self.assertEqual(f.read(), '')
         # snapshot scores file was not modified by the organ filter
         with open(os.path.join(self.snapshot, 'result', 'sc_query', 'result_scores.json'), encoding='utf-8') as f:
             self.assertIn('lung', f.read())
