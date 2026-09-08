@@ -1,12 +1,15 @@
-"""Demo task construction: copy a pre-built real-result snapshot.
+"""Demo task construction: hardlink a managed real-result snapshot.
 
 Try Demo creates a real tasks/SubTask graph that is already Completed. It
-never submits SLURM work. The workspace is populated by copying a snapshot
-of a REAL completed analysis (result/ + dataset_<uuid>/) from
+never submits SLURM work. The workspace is populated by hard-linking a
+snapshot of a REAL completed analysis (result/ + dataset_<uuid>/) from
 user_data/demo_result/scst/<uuid>/, so every panel shows the genuine output
-of that run. Real copies keep each demo workspace fully independent, so any
-later cleanup of the snapshot source or of past demo tasks cannot break a
-live demo.
+of that run while the whole server shares a single copy of the data.
+
+The snapshot under demo_result/ is a MANAGED deployment asset, not scratch
+data: deleting it breaks every demo created afterwards. Deleting demo task
+directories is always safe - it only unlinks the entries inside those
+directories and never touches the snapshot files themselves.
 """
 
 import json
@@ -45,10 +48,11 @@ def find_demo_snapshot(dataset_title):
     Checked in order:
       1. <repo root>/demo_result/scst/<title>  (gitignored; v1 convention)
       2. <USERTASKPATH>/demo_result/scst/<title> (preferred on the server:
-         same filesystem as the task workspaces, so hardlinks work)
+         same filesystem as the task workspaces, so hardlinks are possible)
     """
+    # __file__ = <repo>/task/demo.py -> one '..' reaches the repo root
     repo_root = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), '..', '..', '..', 'demo_result', 'scst')
+        os.path.join(os.path.dirname(__file__), '..', 'demo_result', 'scst')
     )
     ws_root = os.path.normpath(os.path.join(local_settings.USERTASKPATH, 'demo_result', 'scst'))
     for root in (repo_root, ws_root):
@@ -75,9 +79,26 @@ def task_is_demo(main_task):
 
 
 def _copy_tree(src, dst):
-    """Recursively copy every file under src into dst (real copies)."""
+    """Populate dst with hardlinks to every file under src (copy fallback).
+
+    Hardlinks keep the on-disk data at one copy server-wide; unlinking demo
+    task directories never touches the snapshot inodes. copy2 covers the
+    cross-device edge case where linking is impossible.
+    """
     import shutil
-    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        dst_root = dst if rel == '.' else os.path.join(dst, rel)
+        os.makedirs(dst_root, exist_ok=True)
+        for name in files:
+            dst_file = os.path.join(dst_root, name)
+            if os.path.lexists(dst_file):
+                continue
+            try:
+                os.link(os.path.join(root, name), dst_file)
+            except OSError:
+                shutil.copy2(os.path.join(root, name), dst_file)
 
 
 def _available_mapping_methods(ds_dir, subtask_type):
@@ -138,8 +159,9 @@ def create_demo_task_rows(demo_task, dataset_id, ds_dir):
 def _write_organ_filtered_scores(task_abs_path, organ):
     """Keep only the demo organ's entries from the snapshot's real scores.
 
-    The linked result_scores.json shares an inode with the snapshot, so it is
-    unlinked before writing; the snapshot file itself is never modified.
+    The task-side result_scores.json is a hardlink into the snapshot, so it
+    is unlinked before writing the filtered copy - writing in place would
+    corrupt the shared snapshot file. Same applies to the copy fallback.
     """
     scores_path = os.path.join(task_abs_path, 'result', 'sc_query', 'result_scores.json')
     if not os.path.isfile(scores_path):
@@ -157,7 +179,7 @@ def _write_organ_filtered_scores(task_abs_path, organ):
 def build_demo_snapshot(task_abs_path, dataset, organ):
     """Populate the task workspace from the real-result snapshot.
 
-    Copies result/ + dataset_<uuid>/ and filters the real result_scores.json
+    Hardlinks result/ + dataset_<uuid>/ and filters the real result_scores.json
     to the demo organ so the card list stays scoped (the frontend enables only
     the demo dataset anyway). Raises FileNotFoundError when no snapshot exists
     so createDemoTask fails loudly instead of serving an empty demo.

@@ -1102,8 +1102,8 @@ class CreateDemoTaskTests(TestCase):
             scores = json_module.load(f)
         self.assertEqual(list(scores.keys()), ['breast'])
 
-        # workspace files are real copies of the snapshot (independent inodes)
-        copied = os.path.join(
+        # workspace files are hardlinks into the snapshot (one server-wide copy)
+        linked = os.path.join(
             task_dir, 'dataset_' + self.dataset_title,
             'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
         )
@@ -1111,10 +1111,7 @@ class CreateDemoTaskTests(TestCase):
             self.snapshot, 'dataset_' + self.dataset_title,
             'subtask_cellchat', 'result', 'sc_st_mapping', 'tangram', 'cellchat_result.rds',
         )
-        self.assertTrue(os.path.isfile(copied))
-        self.assertFalse(os.path.samestat(os.stat(copied), os.stat(source)))
-        with open(copied, encoding='utf-8') as f:
-            self.assertEqual(f.read(), '')
+        self.assertTrue(os.path.samefile(linked, source))
         # snapshot scores file was not modified by the organ filter
         with open(os.path.join(self.snapshot, 'result', 'sc_query', 'result_scores.json'), encoding='utf-8') as f:
             self.assertIn('lung', f.read())
