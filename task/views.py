@@ -87,7 +87,7 @@ def _sync_dependency_from_slurm(dep_subtask):
 # --- see PIPELINE_FLOW.md $3) — enforced at both creation entry points.
 import re
 
-PARAM_PROJECTNAME_RE = re.compile(r'^[\w][\w .\-]{0,63}$')
+PARAM_PROJECTNAME_RE = re.compile(r'^[\w][\w\-]{0,63}$')
 PARAM_ORGANPARTS_RE = re.compile(r'^[\w,]{1,128}$')  # comma-joined organ values
 PARAM_DISEASE_RE = re.compile(r'^(all|normal|cancer)$')
 
@@ -104,7 +104,7 @@ def validate_pipeline_params(parameters_dict):
         return 'Missing projectname'
     if not isinstance(projectname, str) or not PARAM_PROJECTNAME_RE.fullmatch(projectname):
         return ('Invalid projectname: use 1-64 characters (letters, digits, '
-                'underscore, space, dot, dash; must start with a letter or digit)')
+                'underscore, dash; must start with a letter or digit)')
     organ_parts = parameters_dict.get('organParts')
     if organ_parts is None:
         return 'Missing organParts'
