@@ -83,6 +83,41 @@ def _sync_dependency_from_slurm(dep_subtask):
     except Exception:
         pass
 
+# --- Parameter whitelist (projectname lands in file names and SLURM args;
+# --- see PIPELINE_FLOW.md $3) — enforced at both creation entry points.
+import re
+
+PARAM_PROJECTNAME_RE = re.compile(r'^[\w][\w .\-]{0,63}$')
+PARAM_ORGANPARTS_RE = re.compile(r'^[\w,]{1,128}$')  # comma-joined organ values
+PARAM_DISEASE_RE = re.compile(r'^(all|normal|cancer)$')
+
+
+def validate_pipeline_params(parameters_dict):
+    """Return an error message for unsafe pipeline parameters, or None.
+
+    projectname becomes a filename prefix (run.sh $3) and part of SLURM
+    argv; organParts/disease flow into the same scripts. Whitelist instead
+    of blacklist: letters/digits/underscore/space/dot/dash, 1-64 chars.
+    """
+    projectname = parameters_dict.get('projectname')
+    if projectname is None:
+        return 'Missing projectname'
+    if not isinstance(projectname, str) or not PARAM_PROJECTNAME_RE.fullmatch(projectname):
+        return ('Invalid projectname: use 1-64 characters (letters, digits, '
+                'underscore, space, dot, dash; must start with a letter or digit)')
+    organ_parts = parameters_dict.get('organParts')
+    if organ_parts is None:
+        return 'Missing organParts'
+    if not isinstance(organ_parts, str) or not PARAM_ORGANPARTS_RE.fullmatch(organ_parts):
+        return 'Invalid organParts'
+    disease = parameters_dict.get('disease')
+    if disease is None:
+        return 'Missing disease'
+    if not isinstance(disease, str) or not PARAM_DISEASE_RE.fullmatch(disease):
+        return 'Invalid disease'
+    return None
+
+
 @api_view(['POST'])
 def createtask(request):
     """
@@ -161,6 +196,14 @@ def createtask(request):
         import shutil
         shutil.rmtree(userpath, ignore_errors=True)
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
+
+    # projectname lands in file names and SLURM argv (run.sh $3) - reject
+    # unsafe values before any state is created
+    param_error = validate_pipeline_params(parameters_dict)
+    if param_error:
+        import shutil
+        shutil.rmtree(userpath, ignore_errors=True)
+        return Response({'status': 'Failed', 'message': param_error}, status=400)
 
     # Track SLURM job submitted during module processing so we can scancel it if a
     # later step fails (no orphan jobs when task creation partially succeeds).
@@ -606,6 +649,11 @@ def create_subtask(request):
         parameters_dict = json.loads(parameters_string)
     except (json.JSONDecodeError, TypeError) as e:
         return Response({'status': 'Failed', 'message': f'Invalid parameters JSON: {str(e)}'}, status=400)
+
+    # same whitelist as createtask: subtask args reach the same SLURM scripts
+    param_error = validate_pipeline_params(parameters_dict)
+    if param_error:
+        return Response({'status': 'Failed', 'message': param_error}, status=400)
 
     try:
         result = create_subtask_service(main_task, userid, dataset_id, subtasktype, parameters_dict)
